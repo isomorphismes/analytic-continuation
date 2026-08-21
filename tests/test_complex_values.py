@@ -23,6 +23,16 @@ class ParseComplexTests(unittest.TestCase):
         with self.assertRaises(ComplexValueError):
             parse_complex([float("nan"), 0], "value")
 
+    def test_rejects_nonfinite_scalar(self) -> None:
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ComplexValueError, "must be finite"):
+                    parse_complex(value, "value")
+
+    def test_rejects_scalar_integer_that_overflows_float(self) -> None:
+        with self.assertRaisesRegex(ComplexValueError, "must be finite"):
+            parse_complex(10**1000, "value")
+
 
 if __name__ == "__main__":
     unittest.main()

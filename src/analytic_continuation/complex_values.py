@@ -22,7 +22,7 @@ def parse_complex(value: Any, field_name: str) -> complex:
         raise ComplexValueError(f"{field_name} must be a complex value, not a boolean")
 
     if isinstance(value, (int, float)):
-        return complex(float(value), 0.0)
+        return complex(_parse_real(value, field_name), 0.0)
 
     if isinstance(value, Mapping):
         unknown = set(value) - {"real", "imag"}
@@ -56,7 +56,10 @@ def complex_to_pair(value: complex) -> list[float]:
 def _parse_real(value: Any, field_name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ComplexValueError(f"{field_name} must be a real number")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as error:
+        raise ComplexValueError(f"{field_name} must be finite") from error
     if not math.isfinite(number):
         raise ComplexValueError(f"{field_name} must be finite")
     return number

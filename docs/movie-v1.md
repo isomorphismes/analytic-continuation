@@ -17,7 +17,8 @@ files that omit `view.mode` keep the default whole-plane behavior.
 Complex values are finite JSON numbers, `[real, imag]` pairs, or objects with
 `real` and optional `imag` fields. `Infinity`, `NaN`, and expression strings
 are not complex values in this contract. A finite input mapped to infinity is
-represented as a rational pole, not as a nonfinite JSON number.
+represented by the selected function's pole metadata (or by a rational pole
+factor), not as a nonfinite JSON number.
 
 ## Rational factors
 
