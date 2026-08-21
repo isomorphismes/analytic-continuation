@@ -1,0 +1,40 @@
+touch_release_threshold_pixels ∈ float ← 12.0
+
+
+def complex_position_for_touch(touch_x ∈ float, touch_y ∈ float, screen_width ∈ float, screen_height ∈ float, center_real ∈ float, center_imaginary ∈ float, half_height ∈ float) → complex:
+    aspect ∈ float ← screen_width ÷ screen_height
+    normalized_real ∈ float ← 2.0 × touch_x ÷ screen_width - 1.0
+    normalized_imaginary ∈ float ← 1.0 - 2.0 × touch_y ÷ screen_height
+    real ∈ float ← center_real + normalized_real × half_height × aspect
+    imaginary ∈ float ← center_imaginary + normalized_imaginary × half_height
+    return real + imaginary × 1j
+
+
+def released_touch_is_tap(down_x ∈ float, down_y ∈ float, release_x ∈ float, release_y ∈ float) → bool:
+    delta_x ∈ float ← release_x - down_x
+    delta_y ∈ float ← release_y - down_y
+    distance_squared ∈ float ← delta_x × delta_x + delta_y × delta_y
+    threshold_squared ∈ float ← (
+        touch_release_threshold_pixels × touch_release_threshold_pixels
+    )
+    return distance_squared <= threshold_squared
+
+
+def place_released_touch(selected_placement ∈ str, down_x ∈ float, down_y ∈ float, release_x ∈ float, release_y ∈ float, screen_width ∈ float, screen_height ∈ float, center_real ∈ float, center_imaginary ∈ float, half_height ∈ float, zeros ∈ list[complex], infinities ∈ list[complex]) → bool:
+    if released_touch_is_tap(down_x, down_y, release_x, release_y):
+        position ∈ complex ← complex_position_for_touch(
+            release_x,
+            release_y,
+            screen_width,
+            screen_height,
+            center_real,
+            center_imaginary,
+            half_height,
+        )
+        if selected_placement == "zero":
+            zeros.append(position)
+            return True
+        elif selected_placement == "infinity":
+            infinities.append(position)
+            return True
+    return False
