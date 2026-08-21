@@ -61,15 +61,15 @@ The defaults are:
 ```
 
 `half_height` and `grid_step` must be positive finite real numbers. In `whole`
-mode, a `continuation` object is rejected so that ignored settings cannot look
+mode, a `disc_reveal` object is rejected so that ignored settings cannot look
 effective.
 
-Continuation-disc mode is explicit:
+Disc-reveal mode is explicit:
 
 ```json
 "view": {
-  "mode": "continuation",
-  "continuation": {
+  "mode": "disc_reveal",
+  "disc_reveal": {
     "path": [[2, 0], [2, 1], [1, 2]],
     "patch_reveal_seconds": 0.35
   }
@@ -86,11 +86,12 @@ Continuation-disc mode is explicit:
   branch tracking would be needed.
 
 The renderer reveals these checked patches in path order, then evaluates the
-registered closed form for the usual open/close deformation. It does not
-calculate Taylor coefficients or propagate values from patch to patch. Patches
-clip the exact whole-view plane lattice, including axes and faded subdivisions;
-their overlapping line intervals are merged into a geometric union before the
-deformation.
+registered closed form for the usual open/close deformation. `disc_reveal` is
+not analytic continuation: it does not calculate Taylor coefficients, carry a
+germ, or propagate values from patch to patch. The name `continuation` remains
+available for that later operation. Patches clip the exact whole-view plane
+lattice, including axes and faded subdivisions; their overlapping line
+intervals are merged into a geometric union before the deformation.
 
 ## Animation
 

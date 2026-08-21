@@ -56,10 +56,10 @@ class FunctionOpenClose(Scene):
         movie = load_movie_spec(specification_path)
         complex_function = make_complex_function(movie.function)
         continuation_discs: tuple[ContinuationDisc, ...] = ()
-        if movie.view.continuation is not None:
+        if movie.view.disc_reveal is not None:
             continuation_discs = plan_continuation_discs(
                 complex_function,
-                movie.view.continuation.path,
+                movie.view.disc_reveal.path,
             )
 
         half_width = movie.view.half_height * FRAME_WIDTH / FRAME_HEIGHT
@@ -95,19 +95,19 @@ class FunctionOpenClose(Scene):
         )
 
         revealed_grid: VGroup | None = None
-        if movie.view.continuation is not None:
+        if movie.view.disc_reveal is not None:
             if len(input_factor_markers) > 0:
                 self.play(
                     FadeIn(input_factor_markers),
                     run_time=min(
                         0.5,
-                        movie.view.continuation.patch_reveal_seconds,
+                        movie.view.disc_reveal.patch_reveal_seconds,
                     ),
                 )
-            revealed_grid = self._reveal_continuation_patches(
+            revealed_grid = self._reveal_disc_patches(
                 coordinate_plane=coordinate_plane,
                 discs=continuation_discs,
-                patch_reveal_seconds=movie.view.continuation.patch_reveal_seconds,
+                patch_reveal_seconds=movie.view.disc_reveal.patch_reveal_seconds,
                 foreground_markers=input_factor_markers,
             )
 
@@ -170,7 +170,7 @@ class FunctionOpenClose(Scene):
                 closing_animations.append(Transform(probe_points, original_probe_points))
             self.play(*closing_animations, run_time=movie.animation.close_seconds)
 
-    def _reveal_continuation_patches(
+    def _reveal_disc_patches(
         self,
         coordinate_plane: ComplexPlane,
         discs: tuple[ContinuationDisc, ...],

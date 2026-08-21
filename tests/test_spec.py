@@ -11,36 +11,36 @@ class MovieSpecTests(unittest.TestCase):
         self.assertEqual(movie.view.center, 0j)
         self.assertEqual(movie.view.half_height, 4.0)
         self.assertEqual(movie.view.mode, "whole")
-        self.assertIsNone(movie.view.continuation)
+        self.assertIsNone(movie.view.disc_reveal)
         self.assertTrue(movie.animation.close)
 
-    def test_parses_continuation_view(self) -> None:
+    def test_parses_disc_reveal_view(self) -> None:
         movie = parse_movie_spec(
             {
                 "function": {"name": "rational"},
                 "view": {
-                    "mode": "continuation",
-                    "continuation": {
+                    "mode": "disc_reveal",
+                    "disc_reveal": {
                         "path": [[2, 0], [2, 1]],
                         "patch_reveal_seconds": 0.4,
                     },
                 },
             }
         )
-        self.assertEqual(movie.view.mode, "continuation")
-        self.assertIsNotNone(movie.view.continuation)
-        assert movie.view.continuation is not None
-        self.assertEqual(movie.view.continuation.path, (2 + 0j, 2 + 1j))
-        self.assertEqual(movie.view.continuation.patch_reveal_seconds, 0.4)
+        self.assertEqual(movie.view.mode, "disc_reveal")
+        self.assertIsNotNone(movie.view.disc_reveal)
+        assert movie.view.disc_reveal is not None
+        self.assertEqual(movie.view.disc_reveal.path, (2 + 0j, 2 + 1j))
+        self.assertEqual(movie.view.disc_reveal.patch_reveal_seconds, 0.4)
 
-    def test_continuation_path_must_not_be_empty(self) -> None:
+    def test_disc_reveal_path_must_not_be_empty(self) -> None:
         with self.assertRaisesRegex(MovieSpecError, "must not be empty"):
             parse_movie_spec(
                 {
                     "function": {"name": "exp"},
                     "view": {
-                        "mode": "continuation",
-                        "continuation": {
+                        "mode": "disc_reveal",
+                        "disc_reveal": {
                             "path": [],
                             "patch_reveal_seconds": 0.4,
                         },
@@ -48,26 +48,26 @@ class MovieSpecTests(unittest.TestCase):
                 }
             )
 
-    def test_continuation_requires_explicit_patch_time(self) -> None:
+    def test_disc_reveal_requires_explicit_patch_time(self) -> None:
         with self.assertRaisesRegex(MovieSpecError, "patch_reveal_seconds is required"):
             parse_movie_spec(
                 {
                     "function": {"name": "exp"},
                     "view": {
-                        "mode": "continuation",
-                        "continuation": {"path": [[0, 0]]},
+                        "mode": "disc_reveal",
+                        "disc_reveal": {"path": [[0, 0]]},
                     },
                 }
             )
 
-    def test_continuation_patch_time_must_be_positive(self) -> None:
+    def test_disc_reveal_patch_time_must_be_positive(self) -> None:
         with self.assertRaisesRegex(MovieSpecError, "must be greater than 0"):
             parse_movie_spec(
                 {
                     "function": {"name": "exp"},
                     "view": {
-                        "mode": "continuation",
-                        "continuation": {
+                        "mode": "disc_reveal",
+                        "disc_reveal": {
                             "path": [[0, 0]],
                             "patch_reveal_seconds": 0,
                         },
@@ -75,8 +75,17 @@ class MovieSpecTests(unittest.TestCase):
                 }
             )
 
-    def test_continuation_mode_requires_settings(self) -> None:
+    def test_disc_reveal_mode_requires_settings(self) -> None:
         with self.assertRaisesRegex(MovieSpecError, "is required"):
+            parse_movie_spec(
+                {
+                    "function": {"name": "exp"},
+                    "view": {"mode": "disc_reveal"},
+                }
+            )
+
+    def test_continuation_name_is_not_used_for_a_closed_form_disc_reveal(self) -> None:
+        with self.assertRaisesRegex(MovieSpecError, "whole.*disc_reveal"):
             parse_movie_spec(
                 {
                     "function": {"name": "exp"},
@@ -84,13 +93,13 @@ class MovieSpecTests(unittest.TestCase):
                 }
             )
 
-    def test_whole_view_rejects_ignored_continuation_settings(self) -> None:
+    def test_whole_view_rejects_ignored_disc_reveal_settings(self) -> None:
         with self.assertRaisesRegex(MovieSpecError, "only allowed"):
             parse_movie_spec(
                 {
                     "function": {"name": "exp"},
                     "view": {
-                        "continuation": {
+                        "disc_reveal": {
                             "path": [[0, 0]],
                             "patch_reveal_seconds": 0.4,
                         }

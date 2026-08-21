@@ -6,7 +6,7 @@ on:
     paths:
       - "src/**"
       - "examples/zeta_smoke.json"
-      - "examples/rational_continuation_smoke.json"
+      - "examples/rational_disc_reveal_smoke.json"
       - "pyproject.toml"
       - ".github/workflows/render-sample.yml"
 
@@ -35,16 +35,16 @@ jobs:
             -w -l \
             --video_dir rendered \
             --file_name zeta-open-close
-      - name: Render rational continuation-disc sample
+      - name: Render rational disc-reveal sample
         env:
-          ANALYTIC_CONTINUATION_SPEC: ${{ github.workspace }}/examples/rational_continuation_smoke.json
+          ANALYTIC_CONTINUATION_SPEC: ${{ github.workspace }}/examples/rational_disc_reveal_smoke.json
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           xvfb-run -a manimgl \
             src/analytic_continuation/scene.py FunctionOpenClose \
             -w -l \
             --video_dir rendered \
-            --file_name rational-continuation
+            --file_name rational-disc-reveal
       - uses: actions/upload-artifact@v4
         with:
           name: zeta-open-close
@@ -52,6 +52,6 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: rational-continuation
-          path: rendered/**/rational-continuation.mp4
+          name: rational-disc-reveal
+          path: rendered/**/rational-disc-reveal.mp4
           if-no-files-found: error

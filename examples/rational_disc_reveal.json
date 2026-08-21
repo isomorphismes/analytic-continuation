@@ -1,6 +1,6 @@
 {
   "schema": "analytic-continuation/movie-v1",
-  "title": "Rational continuation discs around a pole",
+  "title": "Rational disc reveal around a pole",
   "function": {
     "name": "rational",
     "parameters": {
@@ -18,8 +18,8 @@
     "center": [0.0, 0.0],
     "half_height": 3.2,
     "grid_step": 0.5,
-    "mode": "continuation",
-    "continuation": {
+    "mode": "disc_reveal",
+    "disc_reveal": {
       "path": [
         [2.0, 0.0],
         [2.0, 1.0],

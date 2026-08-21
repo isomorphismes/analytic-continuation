@@ -17,7 +17,7 @@ class MovieSpecError(ValueError):
 
 
 @dataclass(frozen=True)
-class ContinuationViewSpec:
+class DiscRevealSpec:
     path: tuple[complex, ...]
     patch_reveal_seconds: float
 
@@ -28,7 +28,7 @@ class ViewSpec:
     half_height: float = 4.0
     grid_step: float = 1.0
     mode: str = "whole"
-    continuation: ContinuationViewSpec | None = None
+    disc_reveal: DiscRevealSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -101,7 +101,7 @@ def _parse_view(raw: Any) -> ViewSpec:
     _reject_unknown(
         "view",
         raw,
-        {"center", "half_height", "grid_step", "mode", "continuation"},
+        {"center", "half_height", "grid_step", "mode", "disc_reveal"},
     )
 
     try:
@@ -113,36 +113,36 @@ def _parse_view(raw: Any) -> ViewSpec:
     grid_step = _positive_real(raw.get("grid_step", 1.0), "view.grid_step")
 
     mode = raw.get("mode", "whole")
-    if not isinstance(mode, str) or mode not in {"whole", "continuation"}:
-        raise MovieSpecError("view.mode must be 'whole' or 'continuation'")
+    if not isinstance(mode, str) or mode not in {"whole", "disc_reveal"}:
+        raise MovieSpecError("view.mode must be 'whole' or 'disc_reveal'")
 
     if mode == "whole":
-        if "continuation" in raw:
+        if "disc_reveal" in raw:
             raise MovieSpecError(
-                "view.continuation is only allowed when view.mode is 'continuation'"
+                "view.disc_reveal is only allowed when view.mode is 'disc_reveal'"
             )
-        continuation = None
+        disc_reveal = None
     else:
-        if "continuation" not in raw:
+        if "disc_reveal" not in raw:
             raise MovieSpecError(
-                "view.continuation is required when view.mode is 'continuation'"
+                "view.disc_reveal is required when view.mode is 'disc_reveal'"
             )
-        continuation = _parse_continuation_view(raw["continuation"])
+        disc_reveal = _parse_disc_reveal(raw["disc_reveal"])
 
     return ViewSpec(
         center=center,
         half_height=half_height,
         grid_step=grid_step,
         mode=mode,
-        continuation=continuation,
+        disc_reveal=disc_reveal,
     )
 
 
-def _parse_continuation_view(raw: Any) -> ContinuationViewSpec:
+def _parse_disc_reveal(raw: Any) -> DiscRevealSpec:
     if not isinstance(raw, Mapping):
-        raise MovieSpecError("view.continuation must be an object")
+        raise MovieSpecError("view.disc_reveal must be an object")
     _reject_unknown(
-        "view.continuation",
+        "view.disc_reveal",
         raw,
         {"path", "patch_reveal_seconds"},
     )
@@ -151,25 +151,25 @@ def _parse_continuation_view(raw: Any) -> ContinuationViewSpec:
     if not isinstance(path_values, Sequence) or isinstance(
         path_values, (str, bytes, bytearray)
     ):
-        raise MovieSpecError("view.continuation.path must be a list of complex centers")
+        raise MovieSpecError("view.disc_reveal.path must be a list of complex centers")
     if not path_values:
-        raise MovieSpecError("view.continuation.path must not be empty")
+        raise MovieSpecError("view.disc_reveal.path must not be empty")
 
     try:
         path = tuple(
-            parse_complex(value, f"view.continuation.path[{index}]")
+            parse_complex(value, f"view.disc_reveal.path[{index}]")
             for index, value in enumerate(path_values)
         )
     except ComplexValueError as error:
         raise MovieSpecError(str(error)) from error
 
     if "patch_reveal_seconds" not in raw:
-        raise MovieSpecError("view.continuation.patch_reveal_seconds is required")
+        raise MovieSpecError("view.disc_reveal.patch_reveal_seconds is required")
     patch_reveal_seconds = _positive_real(
         raw["patch_reveal_seconds"],
-        "view.continuation.patch_reveal_seconds",
+        "view.disc_reveal.patch_reveal_seconds",
     )
-    return ContinuationViewSpec(
+    return DiscRevealSpec(
         path=path,
         patch_reveal_seconds=patch_reveal_seconds,
     )

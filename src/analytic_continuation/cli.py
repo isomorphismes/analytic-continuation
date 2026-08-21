@@ -29,10 +29,10 @@ def main(arguments: list[str] | None = None) -> int:
         specification_path = Path(parsed.specification).resolve()
         movie = load_movie_spec(specification_path)
         complex_function = make_complex_function(movie.function)
-        if movie.view.continuation is not None:
+        if movie.view.disc_reveal is not None:
             plan_continuation_discs(
                 complex_function,
-                movie.view.continuation.path,
+                movie.view.disc_reveal.path,
             )
 
         if parsed.command == "validate":

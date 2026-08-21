@@ -14,7 +14,7 @@ analytic continuation.  This project keeps the same distinction explicit.
 
 - choose a named complex function in JSON
 - set the visible complex domain
-- use the default `whole` view or reveal an admissible path of Taylor discs
+- use the default `whole` view or preview a path with a `disc_reveal`
 - optionally mark a few input points as yellow probes
 - render the grid and probes opening under `f` and closing back to their inputs
 - clip poles and enormous outputs at the movie boundary so Manim always gets
@@ -55,7 +55,7 @@ python -m pip install -e '.[movie]'
 analytic-continuation list-functions
 analytic-continuation validate examples/zeta.json
 analytic-continuation render examples/zeta.json
-analytic-continuation validate examples/rational_continuation.json
+analytic-continuation validate examples/rational_disc_reveal.json
 ```
 
 Use `--preview` on the render command for ManimGL's interactive window.  The
@@ -100,10 +100,10 @@ and `imag` fields.  They are never expression strings.
 }
 ```
 
-### Continuation-disc view
+### Disc-reveal view
 
 The default `view.mode` is `whole`, so existing movie files remain valid.  A
-`continuation` view supplies a nonempty path of Taylor-disc centers and an
+`disc_reveal` view supplies a nonempty path of Taylor-disc centers and an
 explicit reveal time for each patch:
 
 ```json
@@ -111,8 +111,8 @@ explicit reveal time for each patch:
   "center": [0, 0],
   "half_height": 3.2,
   "grid_step": 0.5,
-  "mode": "continuation",
-  "continuation": {
+  "mode": "disc_reveal",
+  "disc_reveal": {
     "path": [[2, 0], [2, 1], [1, 2], [0, 2]],
     "patch_reveal_seconds": 0.35
   }
@@ -125,14 +125,15 @@ radius bound.  Every next center must lie strictly inside the preceding disc.
 Functions with incomplete finite-singularity metadata, or functions requiring
 branch tracking, are rejected rather than shown misleadingly.
 
-This mode is a **visualization of continuation geometry**, not a computation
-of analytic continuation.  It checks and reveals the overlapping discs in
-path order, then the existing movie still evaluates the selected closed form
-to deform the grid.  Each patch clips the same Manim plane used by `whole`
-mode, including its axes, primary lines, and faded subdivisions.  Overlapping
-line intervals are merged before deformation so the final moving grid is not
-duplicated or transformed twice.  The movie includes the closed-form
-disclosure on screen.
+This mode previews pole-free disc geometry.  It is **not analytic
+continuation**: it does not carry a germ or calculate a new Taylor expansion.
+It checks and reveals the overlapping discs in path order, then evaluates the
+selected closed form to deform the grid.  Each patch clips the same Manim plane
+used by `whole` mode, including its axes, primary lines, and faded
+subdivisions.  Overlapping line intervals are merged before deformation so the
+final moving grid is not duplicated or transformed twice.  The movie includes
+the closed-form disclosure on screen.  The name `continuation` remains free
+for a later mode that actually propagates a germ and demonstrates uniqueness.
 
 ## Wegert boundary
 
@@ -150,10 +151,10 @@ the selected function.
 
 Repeated zero or pole locations represent multiplicity and are retained in
 the function metadata.  Exact matching zero and pole factors cancel
-one-for-one before evaluation, labels, markers, or continuation radii are
+one-for-one before evaluation, labels, markers, or Taylor radii are
 built.  Nearby but unequal locations remain distinct, so a raw transient
-Wegert state is safe to export.  `examples/rational_continuation.json` places
-two zeros and one pole, then takes a valid loop of overlapping discs around
+Wegert state is safe to export.  `examples/rational_disc_reveal.json` places
+two zeros and one pole, then previews a valid loop of overlapping discs around
 that pole.
 The loop starts at one of the zeros, which is a regular Taylor-disc center.
 
