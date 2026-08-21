@@ -1,0 +1,103 @@
+import sys
+
+from touch_placement import place_released_touch
+
+
+def require(condition ∈ bool) → None:
+    if condition:
+        pass
+    else:
+        sys.exit(1)
+
+
+zeros ∈ list[complex] ← []
+infinities ∈ list[complex] ← []
+
+placed_zero ∈ bool ← place_released_touch(
+    "zero",
+    400.0,
+    200.0,
+    400.0,
+    200.0,
+    800.0,
+    400.0,
+    0.0,
+    0.0,
+    4.0,
+    zeros,
+    infinities,
+)
+require(placed_zero)
+require(zeros == [0j])
+
+placed_infinity ∈ bool ← place_released_touch(
+    "infinity",
+    800.0,
+    0.0,
+    800.0,
+    0.0,
+    800.0,
+    400.0,
+    0.0,
+    0.0,
+    4.0,
+    zeros,
+    infinities,
+)
+require(placed_infinity)
+require(zeros == [0j])
+require(infinities == [8.0 + 4.0j])
+
+dragged ∈ bool ← place_released_touch(
+    "zero",
+    400.0,
+    200.0,
+    413.0,
+    200.0,
+    800.0,
+    400.0,
+    0.0,
+    0.0,
+    4.0,
+    zeros,
+    infinities,
+)
+require(dragged == False)
+require(zeros == [0j])
+
+threshold_touch ∈ bool ← place_released_touch(
+    "zero",
+    388.0,
+    200.0,
+    400.0,
+    200.0,
+    800.0,
+    400.0,
+    0.0,
+    0.0,
+    4.0,
+    zeros,
+    infinities,
+)
+require(threshold_touch)
+require(zeros == [0j, 0j])
+
+unknown_placement ∈ bool ← place_released_touch(
+    "something_else",
+    400.0,
+    200.0,
+    400.0,
+    200.0,
+    800.0,
+    400.0,
+    0.0,
+    0.0,
+    4.0,
+    zeros,
+    infinities,
+)
+require(unknown_placement == False)
+require(zeros == [0j, 0j])
+require(infinities == [8.0 + 4.0j])
+
+print("Ithon zero/infinity touch placement passed")
