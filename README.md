@@ -75,6 +75,9 @@ in CI; it does not pretend that the Python renderer runs on the phone. The Play
 bundle workflow renders the named samples and packages them for offline viewing.
 See [`docs/google-play-release.md`](docs/google-play-release.md).
 
+Direct test installs use a separately signed GitHub prerelease APK. See
+[`docs/github-apk-release.md`](docs/github-apk-release.md).
+
 ## Movie JSON
 
 The complete strict contract is documented in [`docs/movie-v1.md`](docs/movie-v1.md).
