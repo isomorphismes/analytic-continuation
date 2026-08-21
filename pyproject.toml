@@ -15,6 +15,8 @@ dependencies = [
 [project.optional-dependencies]
 movie = [
   "manimgl==1.7.2",
+  # ManimGL 1.7.2 still imports pkg_resources at startup.
+  "setuptools<81",
 ]
 
 [project.scripts]
