@@ -31,7 +31,7 @@ jobs:
         run: |
           xvfb-run -a manimgl \
             src/analytic_continuation/scene.py FunctionOpenClose \
-            -w -l --fps 15 \
+            -w -l \
             --video_dir rendered \
             --file_name zeta-open-close
       - uses: actions/upload-artifact@v4
