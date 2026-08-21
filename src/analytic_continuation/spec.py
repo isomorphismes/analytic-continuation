@@ -17,10 +17,18 @@ class MovieSpecError(ValueError):
 
 
 @dataclass(frozen=True)
+class ContinuationViewSpec:
+    path: tuple[complex, ...]
+    patch_reveal_seconds: float
+
+
+@dataclass(frozen=True)
 class ViewSpec:
     center: complex = 0j
     half_height: float = 4.0
     grid_step: float = 1.0
+    mode: str = "whole"
+    continuation: ContinuationViewSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -90,7 +98,11 @@ def parse_movie_spec(raw: Any) -> MovieSpec:
 def _parse_view(raw: Any) -> ViewSpec:
     if not isinstance(raw, Mapping):
         raise MovieSpecError("view must be an object")
-    _reject_unknown("view", raw, {"center", "half_height", "grid_step"})
+    _reject_unknown(
+        "view",
+        raw,
+        {"center", "half_height", "grid_step", "mode", "continuation"},
+    )
 
     try:
         center = parse_complex(raw.get("center", [0.0, 0.0]), "view.center")
@@ -99,7 +111,68 @@ def _parse_view(raw: Any) -> ViewSpec:
 
     half_height = _positive_real(raw.get("half_height", 4.0), "view.half_height")
     grid_step = _positive_real(raw.get("grid_step", 1.0), "view.grid_step")
-    return ViewSpec(center=center, half_height=half_height, grid_step=grid_step)
+
+    mode = raw.get("mode", "whole")
+    if not isinstance(mode, str) or mode not in {"whole", "continuation"}:
+        raise MovieSpecError("view.mode must be 'whole' or 'continuation'")
+
+    if mode == "whole":
+        if "continuation" in raw:
+            raise MovieSpecError(
+                "view.continuation is only allowed when view.mode is 'continuation'"
+            )
+        continuation = None
+    else:
+        if "continuation" not in raw:
+            raise MovieSpecError(
+                "view.continuation is required when view.mode is 'continuation'"
+            )
+        continuation = _parse_continuation_view(raw["continuation"])
+
+    return ViewSpec(
+        center=center,
+        half_height=half_height,
+        grid_step=grid_step,
+        mode=mode,
+        continuation=continuation,
+    )
+
+
+def _parse_continuation_view(raw: Any) -> ContinuationViewSpec:
+    if not isinstance(raw, Mapping):
+        raise MovieSpecError("view.continuation must be an object")
+    _reject_unknown(
+        "view.continuation",
+        raw,
+        {"path", "patch_reveal_seconds"},
+    )
+
+    path_values = raw.get("path")
+    if not isinstance(path_values, Sequence) or isinstance(
+        path_values, (str, bytes, bytearray)
+    ):
+        raise MovieSpecError("view.continuation.path must be a list of complex centers")
+    if not path_values:
+        raise MovieSpecError("view.continuation.path must not be empty")
+
+    try:
+        path = tuple(
+            parse_complex(value, f"view.continuation.path[{index}]")
+            for index, value in enumerate(path_values)
+        )
+    except ComplexValueError as error:
+        raise MovieSpecError(str(error)) from error
+
+    if "patch_reveal_seconds" not in raw:
+        raise MovieSpecError("view.continuation.patch_reveal_seconds is required")
+    patch_reveal_seconds = _positive_real(
+        raw["patch_reveal_seconds"],
+        "view.continuation.patch_reveal_seconds",
+    )
+    return ContinuationViewSpec(
+        path=path,
+        patch_reveal_seconds=patch_reveal_seconds,
+    )
 
 
 def _parse_animation(raw: Any) -> AnimationSpec:

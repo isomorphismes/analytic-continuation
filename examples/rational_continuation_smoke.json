@@ -1,0 +1,36 @@
+{
+  "schema": "analytic-continuation/movie-v1",
+  "title": "Rational continuation smoke test",
+  "function": {
+    "name": "rational",
+    "parameters": {
+      "gain": [1.0, 0.0],
+      "zeros": [
+        [2.0, 0.0]
+      ],
+      "poles": [
+        [0.0, 0.0]
+      ]
+    }
+  },
+  "view": {
+    "center": [0.0, 0.0],
+    "half_height": 3.0,
+    "grid_step": 1.0,
+    "mode": "continuation",
+    "continuation": {
+      "path": [
+        [2.0, 0.0],
+        [2.0, 1.0],
+        [1.0, 2.0]
+      ],
+      "patch_reveal_seconds": 0.1
+    }
+  },
+  "animation": {
+    "open_seconds": 0.5,
+    "hold_seconds": 0.1,
+    "close_seconds": 0.5,
+    "curve_density": 16
+  }
+}

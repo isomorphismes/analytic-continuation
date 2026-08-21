@@ -14,6 +14,7 @@ analytic continuation.  This project keeps the same distinction explicit.
 
 - choose a named complex function in JSON
 - set the visible complex domain
+- use the default `whole` view or reveal an admissible path of Taylor discs
 - optionally mark a few input points as yellow probes
 - render the grid and probes opening under `f` and closing back to their inputs
 - clip poles and enormous outputs at the movie boundary so Manim always gets
@@ -26,7 +27,7 @@ The registry currently contains:
 | `exp` | exponential | entire |
 | `sin` | sine | entire |
 | `polynomial` | coefficients in ascending powers | entire |
-| `rational` | gain, zeros, and poles | meromorphic |
+| `rational` | nonzero gain, zeros, and poles | meromorphic |
 | `zeta` | Riemann zeta | meromorphic continuation; one pole at `1` |
 | `gamma` | gamma | meromorphic |
 | `airy_ai`, `airy_bi` | Airy functions | entire |
@@ -54,6 +55,7 @@ python -m pip install -e '.[movie]'
 analytic-continuation list-functions
 analytic-continuation validate examples/zeta.json
 analytic-continuation render examples/zeta.json
+analytic-continuation validate examples/rational_continuation.json
 ```
 
 Use `--preview` on the render command for ManimGL's interactive window.  The
@@ -67,6 +69,8 @@ python -m unittest discover -s tests -v
 ```
 
 ## Movie JSON
+
+The complete strict contract is documented in [`docs/movie-v1.md`](docs/movie-v1.md).
 
 Complex values are JSON numbers, `[real, imag]` pairs, or objects with `real`
 and `imag` fields.  They are never expression strings.
@@ -96,10 +100,44 @@ and `imag` fields.  They are never expression strings.
 }
 ```
 
+### Continuation-disc view
+
+The default `view.mode` is `whole`, so existing movie files remain valid.  A
+`continuation` view supplies a nonempty path of Taylor-disc centers and an
+explicit reveal time for each patch:
+
+```json
+"view": {
+  "center": [0, 0],
+  "half_height": 3.2,
+  "grid_step": 0.5,
+  "mode": "continuation",
+  "continuation": {
+    "path": [[2, 0], [2, 1], [1, 2], [0, 2]],
+    "patch_reveal_seconds": 0.35
+  }
+}
+```
+
+For a function whose finite singularities are completely known, each disc
+extends from its center to the nearest pole.  Entire functions have no finite
+radius bound.  Every next center must lie strictly inside the preceding disc.
+Functions with incomplete finite-singularity metadata, or functions requiring
+branch tracking, are rejected rather than shown misleadingly.
+
+This mode is a **visualization of continuation geometry**, not a computation
+of analytic continuation.  It checks and reveals the overlapping discs in
+path order, then the existing movie still evaluates the selected closed form
+to deform the grid.  Each patch clips the same Manim plane used by `whole`
+mode, including its axes, primary lines, and faded subdivisions.  Overlapping
+line intervals are merged before deformation so the final moving grid is not
+duplicated or transformed twice.  The movie includes the closed-form
+disclosure on screen.
+
 ## Wegert boundary
 
 Wegert already has the right input for rational maps.  Its zeros and poles,
-together with one complex gain, determine
+together with one nonzero complex gain, determine
 
 ```text
 f(z) = gain × product(z - zero) / product(z - pole).
@@ -110,15 +148,24 @@ camera maps directly to `view.center` and `view.half_height`.  Tapped portrait
 locations can be exported as `probes`; their output values are determined by
 the selected function.
 
+Repeated zero or pole locations represent multiplicity and are retained in
+the function metadata.  Exact matching zero and pole factors cancel
+one-for-one before evaluation, labels, markers, or continuation radii are
+built.  Nearby but unequal locations remain distinct, so a raw transient
+Wegert state is safe to export.  `examples/rational_continuation.json` places
+two zeros and one pole, then takes a valid loop of overlapping discs around
+that pole.
+The loop starts at one of the zeros, which is a regular Taylor-disc center.
+
 A few freely chosen input/output pixel pairs do **not** determine an analytic
 function.  Infinitely many polynomials, and still more analytic functions,
 can pass through any finite set.  If the user is constructing a function,
 the UI must also choose a model such as a rational degree, a differential
 equation with initial data, or a Taylor germ.
 
-## Later: continuation rather than only deformation
+## Later: computing continuation rather than visualizing its geometry
 
-A genuine continuation movie needs different data:
+A continuation computation needs more data than the current disc view:
 
 1. a base point and a Taylor germ (or an equation that determines one),
 2. a path through the complex plane,

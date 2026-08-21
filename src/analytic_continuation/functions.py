@@ -7,6 +7,7 @@ explicit name, parameter contract, evaluator, and mathematical status.
 from __future__ import annotations
 
 import cmath
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -26,15 +27,17 @@ class ComplexFunction:
     label: str
     evaluate: ComplexEvaluator
     analytic_status: str
+    zeros: tuple[complex, ...] = ()
     poles: tuple[complex, ...] = ()
     branch_points: tuple[complex, ...] = ()
+    finite_singularities_complete: bool = False
 
 
 FUNCTION_HELP: dict[str, str] = {
     "exp": "entire exponential",
     "sin": "entire sine",
     "polynomial": "polynomial with coefficients in ascending powers",
-    "rational": "gain times zero factors divided by pole factors",
+    "rational": "nonzero gain times zero factors divided by pole factors",
     "zeta": "Riemann zeta, meromorphic with one pole at 1",
     "gamma": "gamma, meromorphic with poles at 0, -1, -2, ...",
     "airy_ai": "Airy Ai, entire",
@@ -84,12 +87,24 @@ def make_complex_function(specification: Mapping[str, Any]) -> ComplexFunction:
 
 def _make_exp(parameters: Mapping[str, Any]) -> ComplexFunction:
     _require_no_parameters("exp", parameters)
-    return ComplexFunction("exp", "exp(z)", cmath.exp, "entire")
+    return ComplexFunction(
+        "exp",
+        "exp(z)",
+        cmath.exp,
+        "entire",
+        finite_singularities_complete=True,
+    )
 
 
 def _make_sin(parameters: Mapping[str, Any]) -> ComplexFunction:
     _require_no_parameters("sin", parameters)
-    return ComplexFunction("sin", "sin(z)", cmath.sin, "entire")
+    return ComplexFunction(
+        "sin",
+        "sin(z)",
+        cmath.sin,
+        "entire",
+        finite_singularities_complete=True,
+    )
 
 
 def _make_polynomial(parameters: Mapping[str, Any]) -> ComplexFunction:
@@ -117,7 +132,13 @@ def _make_polynomial(parameters: Mapping[str, Any]) -> ComplexFunction:
         return result
 
     degree = len(coefficients) - 1
-    return ComplexFunction("polynomial", f"polynomial of degree {degree}", evaluate, "entire")
+    return ComplexFunction(
+        "polynomial",
+        f"polynomial of degree {degree}",
+        evaluate,
+        "entire",
+        finite_singularities_complete=True,
+    )
 
 
 def _make_rational(parameters: Mapping[str, Any]) -> ComplexFunction:
@@ -129,6 +150,14 @@ def _make_rational(parameters: Mapping[str, Any]) -> ComplexFunction:
         poles = _parse_complex_list(parameters.get("poles", []), "rational.parameters.poles")
     except ComplexValueError as error:
         raise FunctionSpecError(str(error)) from error
+
+    if gain == 0:
+        raise FunctionSpecError(
+            "rational.parameters.gain must be nonzero; zero gain would collapse "
+            "the factor model and make every listed pole removable"
+        )
+
+    zeros, poles = _cancel_shared_factors(zeros, poles)
 
     def evaluate(value: complex) -> complex:
         numerator = gain
@@ -148,7 +177,9 @@ def _make_rational(parameters: Mapping[str, Any]) -> ComplexFunction:
         _rational_label(zeros, poles, gain),
         evaluate,
         status,
+        zeros=zeros,
         poles=poles,
+        finite_singularities_complete=True,
     )
 
 
@@ -161,6 +192,7 @@ def _make_zeta(parameters: Mapping[str, Any]) -> ComplexFunction:
         lambda value: complex(mp.zeta(value)),
         "meromorphic continuation to the plane, with a simple pole at 1",
         poles=(1 + 0j,),
+        finite_singularities_complete=True,
     )
 
 
@@ -172,6 +204,7 @@ def _make_gamma(parameters: Mapping[str, Any]) -> ComplexFunction:
         "Γ(z)",
         lambda value: complex(mp.gamma(value)),
         "meromorphic, with simple poles at the non-positive integers",
+        finite_singularities_complete=False,
     )
 
 
@@ -183,6 +216,7 @@ def _make_airy_ai(parameters: Mapping[str, Any]) -> ComplexFunction:
         "Ai(z)",
         lambda value: complex(mp.airyai(value)),
         "entire",
+        finite_singularities_complete=True,
     )
 
 
@@ -194,6 +228,7 @@ def _make_airy_bi(parameters: Mapping[str, Any]) -> ComplexFunction:
         "Bi(z)",
         lambda value: complex(mp.airybi(value)),
         "entire",
+        finite_singularities_complete=True,
     )
 
 
@@ -221,6 +256,7 @@ def _make_bessel_j(parameters: Mapping[str, Any]) -> ComplexFunction:
         lambda value: complex(mp.besselj(order, value)),
         status,
         branch_points=branch_points,
+        finite_singularities_complete=integral_order,
     )
 
 
@@ -233,6 +269,29 @@ def _parse_complex_list(raw_values: Any, field_name: str) -> tuple[complex, ...]
         parse_complex(value, f"{field_name}[{index}]")
         for index, value in enumerate(raw_values)
     )
+
+
+def _cancel_shared_factors(
+    zeros: tuple[complex, ...],
+    poles: tuple[complex, ...],
+) -> tuple[tuple[complex, ...], tuple[complex, ...]]:
+    """Cancel exact shared factors one-for-one while preserving input order."""
+
+    cancellations = Counter(zeros) & Counter(poles)
+
+    def without_cancelled(
+        values: tuple[complex, ...],
+    ) -> tuple[complex, ...]:
+        remaining_cancellations = cancellations.copy()
+        result: list[complex] = []
+        for value in values:
+            if remaining_cancellations[value] > 0:
+                remaining_cancellations[value] -= 1
+            else:
+                result.append(value)
+        return tuple(result)
+
+    return without_cancelled(zeros), without_cancelled(poles)
 
 
 def _rational_label(zeros: tuple[complex, ...], poles: tuple[complex, ...], gain: complex) -> str:

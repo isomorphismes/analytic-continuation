@@ -1,0 +1,50 @@
+{
+  "schema": "analytic-continuation/movie-v1",
+  "title": "Rational continuation discs around a pole",
+  "function": {
+    "name": "rational",
+    "parameters": {
+      "gain": [1.0, 0.0],
+      "zeros": [
+        [-1.0, 0.0],
+        [2.0, 0.0]
+      ],
+      "poles": [
+        [0.0, 0.0]
+      ]
+    }
+  },
+  "view": {
+    "center": [0.0, 0.0],
+    "half_height": 3.2,
+    "grid_step": 0.5,
+    "mode": "continuation",
+    "continuation": {
+      "path": [
+        [2.0, 0.0],
+        [2.0, 1.0],
+        [1.0, 2.0],
+        [0.0, 2.0],
+        [-1.0, 2.0],
+        [-2.0, 1.0],
+        [-2.0, 0.0],
+        [-2.0, -1.0],
+        [-1.0, -2.0],
+        [0.0, -2.0],
+        [1.0, -2.0],
+        [2.0, -1.0],
+        [2.0, 0.0]
+      ],
+      "patch_reveal_seconds": 0.35
+    }
+  },
+  "probes": [
+    [2.5, 0.0]
+  ],
+  "animation": {
+    "open_seconds": 5.0,
+    "hold_seconds": 1.0,
+    "close_seconds": 5.0,
+    "curve_density": 90
+  }
+}
