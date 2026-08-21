@@ -27,9 +27,9 @@ class ComplexFunction:
     label: str
     evaluate: ComplexEvaluator
     analytic_status: str
-    zeros: tuple[complex, ...] = ()
     poles: tuple[complex, ...] = ()
     branch_points: tuple[complex, ...] = ()
+    zeros: tuple[complex, ...] = ()
     finite_singularities_complete: bool = False
 
 

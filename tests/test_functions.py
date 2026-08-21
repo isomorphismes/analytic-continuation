@@ -4,10 +4,27 @@ import importlib.util
 import math
 import unittest
 
-from analytic_continuation.functions import FunctionSpecError, make_complex_function
+from analytic_continuation.functions import (
+    ComplexFunction,
+    FunctionSpecError,
+    make_complex_function,
+)
 
 
 class ElementaryFunctionTests(unittest.TestCase):
+    def test_existing_positional_poles_and_branch_points_remain_compatible(self) -> None:
+        function = ComplexFunction(
+            "legacy",
+            "legacy(z)",
+            lambda value: value,
+            "test function",
+            (1 + 0j,),
+            (0 + 0j,),
+        )
+        self.assertEqual(function.poles, (1 + 0j,))
+        self.assertEqual(function.branch_points, (0 + 0j,))
+        self.assertEqual(function.zeros, ())
+
     def test_polynomial_coefficients_are_in_ascending_powers(self) -> None:
         function = make_complex_function(
             {
