@@ -1,0 +1,29 @@
+name: Ithon touch placement
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  touch-placement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: analytic-continuation
+      - uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/ithon
+          ref: feature/manimi-dogfood
+          path: ithon
+      - name: Build Ithon
+        working-directory: ithon
+        run: |
+          ./configure --without-ensurepip
+          make -j2
+      - name: Run Ithon touch placement
+        working-directory: analytic-continuation
+        run: >-
+          "$GITHUB_WORKSPACE/ithon/python"
+          "$GITHUB_WORKSPACE/ithon/Lib/ithon_run.py"
+          interaction/touch_placement_test.pi
