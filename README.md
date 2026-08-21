@@ -68,6 +68,13 @@ Run the small non-rendering test suite with:
 python -m unittest discover -s tests -v
 ```
 
+## Android movie viewer
+
+The Android module is deliberately a viewer for MP4 files rendered by ManimGL
+in CI; it does not pretend that the Python renderer runs on the phone. The Play
+bundle workflow renders the named samples and packages them for offline viewing.
+See [`docs/google-play-release.md`](docs/google-play-release.md).
+
 ## Movie JSON
 
 The complete strict contract is documented in [`docs/movie-v1.md`](docs/movie-v1.md).
