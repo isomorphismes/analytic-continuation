@@ -1,0 +1,25 @@
+{
+  "schema": "analytic-continuation/movie-v1",
+  "title": "Riemann zeta ζ(z)",
+  "function": {
+    "name": "zeta"
+  },
+  "view": {
+    "center": [0.0, 0.0],
+    "half_height": 4.0,
+    "grid_step": 0.5
+  },
+  "probes": [
+    [2.0, 0.0],
+    [-1.0, 0.0],
+    [0.5, 0.0]
+  ],
+  "animation": {
+    "open_seconds": 6.0,
+    "hold_seconds": 1.5,
+    "close_seconds": 6.0,
+    "close": true,
+    "curve_density": 90,
+    "output_margin": 0.94
+  }
+}

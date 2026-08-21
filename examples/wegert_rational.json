@@ -1,0 +1,31 @@
+{
+  "schema": "analytic-continuation/movie-v1",
+  "title": "Wegert rational input",
+  "function": {
+    "name": "rational",
+    "parameters": {
+      "gain": [1.0, 0.0],
+      "zeros": [
+        [1.0, 0.0],
+        [2.0, 0.0],
+        [5.0, 0.0]
+      ],
+      "poles": []
+    }
+  },
+  "view": {
+    "center": [0.0, 0.0],
+    "half_height": 3.5,
+    "grid_step": 0.5
+  },
+  "probes": [
+    [1.0, 1.0],
+    [3.0, 0.0]
+  ],
+  "animation": {
+    "open_seconds": 5.0,
+    "hold_seconds": 1.0,
+    "close_seconds": 5.0,
+    "curve_density": 90
+  }
+}

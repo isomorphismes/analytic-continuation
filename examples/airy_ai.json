@@ -1,0 +1,23 @@
+{
+  "schema": "analytic-continuation/movie-v1",
+  "title": "Airy Ai(z)",
+  "function": {
+    "name": "airy_ai"
+  },
+  "view": {
+    "center": [0.0, 0.0],
+    "half_height": 4.0,
+    "grid_step": 0.5
+  },
+  "probes": [
+    [0.0, 0.0],
+    [-2.3381074105, 0.0],
+    [0.0, 2.0]
+  ],
+  "animation": {
+    "open_seconds": 5.0,
+    "hold_seconds": 1.0,
+    "close_seconds": 5.0,
+    "curve_density": 80
+  }
+}
