@@ -115,17 +115,17 @@ jobs:
               -w -l \
               --video_dir rendered \
               --file_name zeta-open-close
-          ANALYTIC_CONTINUATION_SPEC="$GITHUB_WORKSPACE/examples/rational_continuation_smoke.json" \
+          ANALYTIC_CONTINUATION_SPEC="$GITHUB_WORKSPACE/examples/rational_disc_reveal_smoke.json" \
             xvfb-run -a manimgl \
               src/analytic_continuation/scene.py FunctionOpenClose \
               -w -l \
               --video_dir rendered \
-              --file_name rational-continuation
+              --file_name rational-disc-reveal
           mkdir -p play-movies
           find rendered -type f -name 'zeta-open-close.mp4' -exec cp '{}' play-movies/ \;
-          find rendered -type f -name 'rational-continuation.mp4' -exec cp '{}' play-movies/ \;
+          find rendered -type f -name 'rational-disc-reveal.mp4' -exec cp '{}' play-movies/ \;
           test -s play-movies/zeta-open-close.mp4
-          test -s play-movies/rational-continuation.mp4
+          test -s play-movies/rational-disc-reveal.mp4
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
