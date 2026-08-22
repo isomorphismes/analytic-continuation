@@ -1,0 +1,26 @@
+{
+  "schema": "analytic-continuation/movie-v1",
+  "title": "Bessel J₀(z)",
+  "function": {
+    "name": "bessel_j",
+    "parameters": {
+      "order": 0
+    }
+  },
+  "view": {
+    "center": [0.0, 0.0],
+    "half_height": 6.0,
+    "grid_step": 1.0
+  },
+  "probes": [
+    [0.0, 0.0],
+    [2.4048255577, 0.0],
+    [0.0, 3.0]
+  ],
+  "animation": {
+    "open_seconds": 5.0,
+    "hold_seconds": 1.0,
+    "close_seconds": 5.0,
+    "curve_density": 80
+  }
+}
