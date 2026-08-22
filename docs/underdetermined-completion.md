@@ -29,7 +29,7 @@ degree of freedom.  At eight points the family is completely determined.
 
 ## Interaction rule
 
-The first useful gesture can be "lock what I see here":
+A tap means "lock what I see here":
 
 1. Evaluate the currently displayed completion at the tapped domain point.
 2. Add that `(domain, value)` pair as a constraint.
@@ -40,9 +40,20 @@ Step 3 matters visually: adding a point must not make the picture jump.  It
 changes which future motions are legal, not the function shown on the locking
 frame.
 
-Exact target-value gestures can use the same representation later.  In
-particular a marker may impose `f(z)=0`, `f(z)=1`, or any other chosen complex
-value rather than locking the current value.
+A one-finger drag creates the zero/one symbol directly.  The finger-down point
+is constrained to lie in `f^-1(0)` and is drawn as the dot.  The release point
+is constrained to lie in `f^-1(1)` and is the plain terminus of the line from
+the dot.  The symbol is previewed while the finger moves, then remains over the
+domain coloring after both exact constraints are accepted.  A zero/one symbol
+therefore removes two complex degrees of freedom.
+
+Single-finger drag is reserved for creating this symbol.  Two-finger pinch
+continues to pan and zoom the camera, and the existing three-finger gesture
+resets the experiment.
+
+Ordinary locked values remain ring markers.  The zero and one endpoints do not:
+the dot-and-line glyph replaces those circles so the picture states the actual
+constraint geometrically.
 
 ## Motion
 
@@ -62,13 +73,19 @@ point.
 
 The fragment shader receives eight complex coefficients and evaluates the
 polynomial with Horner's rule.  That is eight complex multiply-adds per pixel.
+The dot/line overlay adds only a few point-to-segment distance calculations for
+the small fixed constraint set.
 
 The existing rational domain-coloring shader can loop over as many as 64 zeros
 and 64 poles, including distances, arguments, and logarithms.  The completion
 evaluation is therefore small compared with the work the current shader already
 accepts.  The random walk and interpolation happen once per frame or once per
-tap on the CPU, not once per pixel.
+gesture on the CPU, not once per pixel.
 
 If degree seven is visually too restrictive, the same representation can move
 to a larger polynomial or another finite analytic basis.  The important
 contract is that the free basis functions vanish at every user-fixed point.
+
+The dot/line supplies two exact value constraints inside this finite family.  It
+does not, by itself, assert that two values determine an unrestricted
+holomorphic germ.
