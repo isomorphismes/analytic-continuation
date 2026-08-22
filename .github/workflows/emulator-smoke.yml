@@ -54,14 +54,11 @@ jobs:
             adb shell wm density 160
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb logcat -c
+            adb shell '( sleep 1; input swipe 112 264 208 264 400; sleep 1; input tap 160 168; sleep 1; timeout 2 screencap -p /sdcard/analytic-continuation-emulator.png || true; am force-stop org.isomorphisms.analyticcontinuation ) >/data/local/tmp/analytic-input.log 2>&1 &'
             adb shell am start -W -n org.isomorphisms.analyticcontinuation/.ExplorerActivity
-            sleep 0.2
-            adb shell input swipe 112 264 208 264 400
-            sleep 0.1
-            adb shell input tap 160 168
-            timeout 5 adb exec-out screencap -p > analytic-continuation-emulator.png || true
-            timeout 5 adb shell am force-stop org.isomorphisms.analyticcontinuation || true
+            sleep 6
             adb wait-for-device
+            adb pull /sdcard/analytic-continuation-emulator.png analytic-continuation-emulator.png || true
             adb logcat -d -t 5000 > analytic-continuation-emulator.log
             grep -Fq 'vibrating analytic completion dot-line renderer ready' analytic-continuation-emulator.log
             grep -Fq 'completion zero-one symbol added:' analytic-continuation-emulator.log
