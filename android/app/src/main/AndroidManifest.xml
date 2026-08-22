@@ -4,11 +4,11 @@
 
     <application
         android:allowBackup="false"
-        android:label="Analytic Continuation"
+        android:label="Analytic Continuation — Lasso"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
-            android:name=".ExplorerActivity"
+            android:name="org.isomorphisms.analyticcontinuation.ExplorerActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|density"
             android:exported="true"
             android:screenOrientation="landscape"
