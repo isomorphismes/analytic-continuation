@@ -43,6 +43,7 @@ android {
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
+        manifestPlaceholders["appLabel"] = "Analytic Continuation — Lasso"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -83,6 +84,7 @@ android {
             // user to uninstall that broken copy; future builds update in place.
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-dev"
+            manifestPlaceholders["appLabel"] = "Analytic Continuation — Lasso Dev"
             signingConfig = signingConfigs.getByName("sideloadDev")
         }
 
