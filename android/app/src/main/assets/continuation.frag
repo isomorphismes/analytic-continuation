@@ -191,19 +191,19 @@ void main() {
         color = mix(color, vec3(0.98), inner);
     }
 
-    // Minimal controls: pause/run at upper left, clear zeros at upper right.
+    // Keep app controls clear of Android's right-edge navigation strip.
     float control_radius = clamp(0.052 * min(u_resolution.x, u_resolution.y), 28.0, 42.0);
     vec2 pause_center = vec2(
         control_radius + 16.0,
         u_resolution.y - control_radius - 16.0
     );
-    vec2 clear_center = vec2(
-        u_resolution.x - control_radius - 16.0,
+    vec2 close_center = vec2(
+        u_resolution.x - 4.0 * control_radius - 16.0,
         u_resolution.y - control_radius - 16.0
     );
     float pause_disk = circle_mask(gl_FragCoord.xy, pause_center, control_radius);
-    float clear_disk = circle_mask(gl_FragCoord.xy, clear_center, control_radius);
-    color = mix(color, vec3(0.04), max(pause_disk, clear_disk) * 0.78);
+    float close_disk = circle_mask(gl_FragCoord.xy, close_center, control_radius);
+    color = mix(color, vec3(0.04), max(pause_disk, close_disk) * 0.78);
 
     float mark = 0.0;
     if (u_paused == 0) {
@@ -235,8 +235,8 @@ void main() {
         mark,
         line_mask(
             gl_FragCoord.xy,
-            clear_center + vec2(-10.0, -10.0),
-            clear_center + vec2(10.0, 10.0),
+            close_center + vec2(-10.0, -10.0),
+            close_center + vec2(10.0, 10.0),
             2.2
         )
     );
@@ -244,8 +244,8 @@ void main() {
         mark,
         line_mask(
             gl_FragCoord.xy,
-            clear_center + vec2(-10.0, 10.0),
-            clear_center + vec2(10.0, -10.0),
+            close_center + vec2(-10.0, 10.0),
+            close_center + vec2(10.0, -10.0),
             2.2
         )
     );
