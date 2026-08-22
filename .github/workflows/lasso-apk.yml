@@ -48,6 +48,12 @@ jobs:
       - name: Install native Android toolchain
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
+      - name: Verify pinch zoom is wired through CPU and GPU
+        run: |
+          grep -Fq 'engine->zoom' android/app/src/main/cpp/analytic_continuation.c
+          grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag
+          grep -Fq 'AMOTION_EVENT_ACTION_POINTER_DOWN' android/app/src/main/cpp/analytic_continuation.c
+
       - name: Build lasso APK
         working-directory: android
         run: ./gradlew --no-daemon :app:assembleDebug
