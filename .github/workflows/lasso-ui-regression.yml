@@ -90,13 +90,13 @@ jobs:
             grep -Fq 'lasso ready:' lasso-ui-emulator.log
             grep -Fq 'lasso first frame:' lasso-ui-emulator.log
 
-            adb shell input tap 58 58
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-ui-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; radius=$((52 * min_side / 1000)); if [ "$radius" -lt 28 ]; then radius=28; fi; if [ "$radius" -gt 42 ]; then radius=42; fi; adb shell input tap "$((radius + 16))" "$((radius + 16))"
             sleep 1
             adb logcat -d > lasso-ui-emulator.log
             grep -Fq 'lasso phase walk paused' lasso-ui-emulator.log
             adb exec-out screencap -p > lasso-ui-emulator.png
 
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-ui-emulator.log | tail -1); width=$1; adb shell input tap "$((width - 58))" 58
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-ui-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; radius=$((52 * min_side / 1000)); if [ "$radius" -lt 28 ]; then radius=28; fi; if [ "$radius" -gt 42 ]; then radius=42; fi; adb shell input tap "$((width - 4 * radius - 16))" "$((radius + 16))"
             sleep 1
             adb logcat -d > lasso-ui-emulator.log
             grep -Fq 'lasso close requested' lasso-ui-emulator.log
