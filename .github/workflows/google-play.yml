@@ -69,6 +69,10 @@ jobs:
           /tmp/analytic-factor-test
           cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_factor_snap.c -lm -o /tmp/analytic-snap-test
           /tmp/analytic-snap-test
+          cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_completion_state.c -lm -o /tmp/analytic-completion-test
+          /tmp/analytic-completion-test
+          cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_zero_one_symbol.c -lm -o /tmp/analytic-zero-one-symbol-test
+          /tmp/analytic-zero-one-symbol-test
 
       - name: Create disposable validation key
         run: |
@@ -128,7 +132,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Launch and touch the GLES explorer
+      - name: Launch and exercise the dot-line completion UI
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -144,16 +148,24 @@ jobs:
             adb shell am start -W -n org.isomorphisms.analyticcontinuation/.ExplorerActivity
             sleep 4
             adb logcat -d > analytic-continuation-emulator.log
-            adb exec-out screencap -p > analytic-continuation-emulator.png
             adb shell pidof -s org.isomorphisms.analyticcontinuation | tr -d '\r' | grep -Eq '^[0-9]+$'
-            grep -Fq 'continuation view enabled' analytic-continuation-emulator.log
-            grep -Eq 'continuation seeded at 0([.]0+)?\+0([.]0+)?i radius=1([.]0+)?' analytic-continuation-emulator.log
-            adb shell input tap "$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print int(dimensions[1] / 2) }' analytic-continuation-emulator.log)" "$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print int(dimensions[2] / 2) }' analytic-continuation-emulator.log)"
+            grep -Fq 'vibrating completion dot-line renderer ready' analytic-continuation-emulator.log
+            width="$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print dimensions[1] }' analytic-continuation-emulator.log)"
+            height="$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print dimensions[2] }' analytic-continuation-emulator.log)"
+            test "$width" -gt 0
+            test "$height" -gt 0
+            adb shell input swipe "$((width * 35 / 100))" "$((height * 55 / 100))" "$((width * 65 / 100))" "$((height * 55 / 100))" 400
+            sleep 1
+            adb logcat -d > analytic-continuation-emulator.log
+            grep -Fq 'completion zero-one symbol added:' analytic-continuation-emulator.log
+            grep -Fq '6 complex dimensions remain' analytic-continuation-emulator.log
+            adb shell input tap "$((width / 2))" "$((height * 35 / 100))"
             sleep 1
             adb logcat -d > analytic-continuation-emulator.log
             adb exec-out screencap -p > analytic-continuation-emulator.png
-            grep -Fq 'continuation step added' analytic-continuation-emulator.log
-            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed' analytic-continuation-emulator.log
+            grep -Fq 'completion point 3 locked' analytic-continuation-emulator.log
+            grep -Fq '5 complex dimensions remain' analytic-continuation-emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|dot-line renderer unavailable' analytic-continuation-emulator.log
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
