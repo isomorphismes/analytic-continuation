@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
 }
@@ -27,7 +29,7 @@ val sideloadKeystoreFile = layout.buildDirectory.file("sideload-signing/lasso-de
 if (!sideloadKeystoreFile.exists()) {
     sideloadKeystoreFile.parentFile.mkdirs()
     sideloadKeystoreFile.writeBytes(
-        java.util.Base64.getDecoder().decode(sideloadKeystoreSource.readText().trim())
+        Base64.getDecoder().decode(sideloadKeystoreSource.readText().trim())
     )
 }
 
