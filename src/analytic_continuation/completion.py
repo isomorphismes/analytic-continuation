@@ -1,25 +1,32 @@
-"""Finite-dimensional completions for an underdetermined complex function.
+"""Transcendental analytic completions for an underdetermined complex function.
 
-A degree-N polynomial has N+1 complex coefficients.  If the user fixes the
-value of the function at m distinct domain points, the remaining functions are
+The displayed function is
 
-    interpolant(z) + product(z - z_i) * q(z),
+    f(z) = A(z) + V(z) W(z)
 
-where q has degree at most N-m.  That representation is useful for the visual
-explorer because every added point removes exactly one complex degree of
-freedom, while all previously fixed values remain exact.
+where V(z) is the product of (z - z_i) over every user-constrained domain
+point, A(z) is an analytic anchor, and W(z) is a small random sum of complex
+exponentials.  V makes every future perturbation vanish at every constrained
+point.  Adding a constraint folds the current V W term into A first, so locking
+the current value does not change the displayed frame.
+
+The exponential modes make the family non-polynomial.  Constraints damp the
+walk but do not consume a finite list of mathematical degrees of freedom.
+The finite mode and constraint counts are rendering/storage budgets only.
 """
 
 from __future__ import annotations
 
+from cmath import exp
 from dataclasses import dataclass
-from math import sqrt
+from math import cos, pi, sin, sqrt
 from random import Random
-from typing import Sequence
 
 
 _DUPLICATE_POINT_TOLERANCE = 1.0e-9
-_DIVISION_TOLERANCE = 1.0e-8
+_DIVISION_TOLERANCE = 1.0e-12
+_DEFAULT_MODE_COUNT = 4
+_DEFAULT_CONSTRAINT_CAPACITY = 12
 
 
 @dataclass(frozen=True)
@@ -30,266 +37,169 @@ class ValueConstraint:
     value: complex
 
 
-def _trim(coefficients: Sequence[complex], tolerance: float = 1.0e-12) -> list[complex]:
-    result = list(coefficients) or [0j]
-    while len(result) > 1 and abs(result[-1]) <= tolerance:
-        result.pop()
-    return result
-
-
-def _add(
-    left: Sequence[complex],
-    right: Sequence[complex],
-) -> list[complex]:
-    count = max(len(left), len(right))
-    return _trim(
-        [
-            (left[index] if index < len(left) else 0j)
-            + (right[index] if index < len(right) else 0j)
-            for index in range(count)
-        ]
-    )
-
-
-def _subtract(
-    left: Sequence[complex],
-    right: Sequence[complex],
-) -> list[complex]:
-    count = max(len(left), len(right))
-    return _trim(
-        [
-            (left[index] if index < len(left) else 0j)
-            - (right[index] if index < len(right) else 0j)
-            for index in range(count)
-        ]
-    )
-
-
-def _multiply(
-    left: Sequence[complex],
-    right: Sequence[complex],
-) -> list[complex]:
-    result = [0j] * (len(left) + len(right) - 1)
-    for left_index, left_value in enumerate(left):
-        for right_index, right_value in enumerate(right):
-            result[left_index + right_index] += left_value * right_value
-    return _trim(result)
-
-
-def _scale(
-    coefficients: Sequence[complex],
-    scalar: complex,
-) -> list[complex]:
-    return _trim([scalar * coefficient for coefficient in coefficients])
-
-
-def evaluate_coefficients(coefficients: Sequence[complex], domain: complex) -> complex:
-    """Evaluate ascending-power coefficients with Horner's rule."""
-
+def _evaluate_polynomial(coefficients: list[complex], domain: complex) -> complex:
     value = 0j
     for coefficient in reversed(coefficients):
         value = value * domain + coefficient
     return value
 
 
-def _interpolating_coefficients(
-    constraints: Sequence[ValueConstraint],
-) -> list[complex]:
-    if not constraints:
-        return [0j]
-
-    result = [0j]
-    for constraint_index, constraint in enumerate(constraints):
-        basis = [1 + 0j]
-        denominator = 1 + 0j
-        for other_index, other in enumerate(constraints):
-            if constraint_index == other_index:
-                continue
-            difference = constraint.domain - other.domain
-            if abs(difference) <= _DUPLICATE_POINT_TOLERANCE:
-                raise ValueError("constraint domain points must be distinct")
-            basis = _multiply(basis, [-other.domain, 1 + 0j])
-            denominator *= difference
-        result = _add(result, _scale(basis, constraint.value / denominator))
-    return result
-
-
-def _vanishing_coefficients(
-    constraints: Sequence[ValueConstraint],
-) -> list[complex]:
-    result = [1 + 0j]
+def _vanishing_coefficients(constraints: tuple[ValueConstraint, ...]) -> list[complex]:
+    coefficients = [1 + 0j]
     for constraint in constraints:
-        result = _multiply(result, [-constraint.domain, 1 + 0j])
-    return result
+        next_coefficients = [0j] * (len(coefficients) + 1)
+        for index, coefficient in enumerate(coefficients):
+            next_coefficients[index] -= constraint.domain * coefficient
+            next_coefficients[index + 1] += coefficient
+        coefficients = next_coefficients
+    return coefficients
 
 
-def _divide_exact(
-    numerator: Sequence[complex],
-    denominator: Sequence[complex],
-) -> list[complex]:
-    remainder = list(_trim(numerator))
-    divisor = _trim(denominator)
-    if abs(divisor[-1]) <= _DIVISION_TOLERANCE:
-        raise ValueError("cannot divide by the zero polynomial")
-
-    if len(remainder) < len(divisor):
-        if max((abs(value) for value in remainder), default=0.0) > _DIVISION_TOLERANCE:
-            raise ValueError("polynomial division left a nonzero remainder")
-        return [0j]
-
-    quotient = [0j] * (len(remainder) - len(divisor) + 1)
-    while len(remainder) >= len(divisor):
-        quotient_coefficient = remainder[-1] / divisor[-1]
-        shift = len(remainder) - len(divisor)
-        quotient[shift] = quotient_coefficient
-
-        for index, divisor_coefficient in enumerate(divisor):
-            remainder[index + shift] -= quotient_coefficient * divisor_coefficient
-        remainder = _trim(remainder, _DIVISION_TOLERANCE)
-
-    if max((abs(value) for value in remainder), default=0.0) > _DIVISION_TOLERANCE:
-        raise ValueError("polynomial division left a nonzero remainder")
-    return _trim(quotient)
+def _evaluate_vanishing(constraints: tuple[ValueConstraint, ...], domain: complex) -> complex:
+    value = 1 + 0j
+    for constraint in constraints:
+        value *= domain - constraint.domain
+    return value
 
 
-def compose_coefficients(
-    maximum_degree: int,
-    constraints: Sequence[ValueConstraint],
-    free_coefficients: Sequence[complex],
-) -> tuple[complex, ...]:
-    """Return one degree-bounded polynomial satisfying all constraints."""
-
-    if maximum_degree < 0:
-        raise ValueError("maximum_degree must be nonnegative")
-    if len(constraints) > maximum_degree + 1:
-        raise ValueError("too many constraints for the selected polynomial degree")
-
-    interpolant = _interpolating_coefficients(constraints)
-    vanishing = _vanishing_coefficients(constraints)
-    free_count = maximum_degree + 1 - len(constraints)
-    free = list(free_coefficients[:free_count])
-    free.extend([0j] * (free_count - len(free)))
-
-    result = _add(interpolant, _multiply(vanishing, free))
-    result.extend([0j] * (maximum_degree + 1 - len(result)))
-    return tuple(result[: maximum_degree + 1])
-
-
-class UnderdeterminedPolynomialFamily:
-    """A bounded random walk through all still-allowed polynomial completions."""
+class UnderdeterminedAnalyticFamily:
+    """A damped random walk through non-polynomial analytic completions."""
 
     def __init__(
         self,
-        maximum_degree: int = 7,
         *,
         random_seed: int = 0,
-        wander_scale: float = 0.018,
-        restoring_strength: float = 0.002,
+        mode_count: int = _DEFAULT_MODE_COUNT,
+        constraint_capacity: int = _DEFAULT_CONSTRAINT_CAPACITY,
+        wander_scale: float = 0.0085,
     ) -> None:
-        if maximum_degree < 0:
-            raise ValueError("maximum_degree must be nonnegative")
+        if mode_count < 2:
+            raise ValueError("mode_count must include a constant mode and a transcendental mode")
+        if constraint_capacity < 1:
+            raise ValueError("constraint_capacity must be positive")
         if wander_scale < 0.0:
             raise ValueError("wander_scale must be nonnegative")
-        if restoring_strength < 0.0 or restoring_strength > 1.0:
-            raise ValueError("restoring_strength must be between zero and one")
 
-        self.maximum_degree = maximum_degree
+        self.constraint_capacity = constraint_capacity
         self.wander_scale = wander_scale
-        self.restoring_strength = restoring_strength
         self._random = Random(random_seed)
         self._constraints: list[ValueConstraint] = []
-        self._free_coefficients = [
-            self._random_complex(0.22) for _ in range(maximum_degree + 1)
+        self._mode_frequencies = [0j]
+        for _ in range(1, mode_count):
+            angle = 2.0 * pi * self._random.random()
+            magnitude = 0.055 + 0.035 * self._random.random()
+            self._mode_frequencies.append(
+                magnitude * complex(cos(angle), sin(angle))
+            )
+
+        self._anchor_polynomials = [
+            [0j] * (constraint_capacity + 1) for _ in range(mode_count)
         ]
-        self._free_coefficients[0] += 1.0 + 0j
+        self._anchor_polynomials[0][0] = 0.55 + 0.15j
+        self._anchor_polynomials[0][1] = 0.90 + 0.05j
+        self._anchor_polynomials[0][2] = 0.08 - 0.06j
+        for mode in range(1, mode_count):
+            scale = 0.075 / mode
+            self._anchor_polynomials[mode][0] = self._random_complex(scale)
+
+        self._wander = [0j] * mode_count
 
     @property
     def constraints(self) -> tuple[ValueConstraint, ...]:
         return tuple(self._constraints)
 
     @property
-    def remaining_complex_dimensions(self) -> int:
-        return self.maximum_degree + 1 - len(self._constraints)
+    def mode_frequencies(self) -> tuple[complex, ...]:
+        return tuple(self._mode_frequencies)
 
     @property
-    def freedom_fraction(self) -> float:
-        return self.remaining_complex_dimensions / (self.maximum_degree + 1)
+    def constraint_slots_remaining(self) -> int:
+        return self.constraint_capacity - len(self._constraints)
 
     @property
-    def coefficients(self) -> tuple[complex, ...]:
-        return compose_coefficients(
-            self.maximum_degree,
-            self._constraints,
-            self._free_coefficients,
+    def motion_scale(self) -> float:
+        return 1.0 / sqrt(1.0 + 0.55 * len(self._constraints))
+
+    @property
+    def is_transcendental(self) -> bool:
+        return any(
+            abs(frequency) > 0.0
+            and any(abs(coefficient) > 0.0 for coefficient in polynomial)
+            for frequency, polynomial in zip(
+                self._mode_frequencies[1:],
+                self._anchor_polynomials[1:],
+            )
         )
 
     def evaluate(self, domain: complex) -> complex:
-        return evaluate_coefficients(self.coefficients, domain)
+        anchor = 0j
+        wander_sum = 0j
+        for frequency, polynomial, wander in zip(
+            self._mode_frequencies,
+            self._anchor_polynomials,
+            self._wander,
+        ):
+            exponential = exp(frequency * domain)
+            anchor += _evaluate_polynomial(polynomial, domain) * exponential
+            wander_sum += wander * exponential
+
+        return anchor + _evaluate_vanishing(self.constraints, domain) * wander_sum
 
     def constrain_value(self, domain: complex, value: complex) -> ValueConstraint:
-        """Add an exact value constraint while preserving every older constraint."""
-
-        if self.remaining_complex_dimensions == 0:
-            raise ValueError("the polynomial family is already fully determined")
-        for constraint in self._constraints:
-            if abs(domain - constraint.domain) <= _DUPLICATE_POINT_TOLERANCE:
-                raise ValueError("that domain point is already constrained")
-
-        current_coefficients = self.coefficients
-        current_value = evaluate_coefficients(current_coefficients, domain)
-        old_vanishing = _vanishing_coefficients(self._constraints)
-        response_at_domain = evaluate_coefficients(old_vanishing, domain)
-        if abs(response_at_domain) <= _DUPLICATE_POINT_TOLERANCE:
+        if self.constraint_slots_remaining <= 0:
+            raise ValueError("constraint storage is full")
+        if any(
+            abs(domain - constraint.domain) <= _DUPLICATE_POINT_TOLERANCE
+            for constraint in self._constraints
+        ):
             raise ValueError("that domain point is already constrained")
 
-        correction = _scale(
-            old_vanishing,
-            (value - current_value) / response_at_domain,
-        )
-        constrained_coefficients = _add(current_coefficients, correction)
+        current_value = self.evaluate(domain)
+        old_constraints = self.constraints
+        response = _evaluate_vanishing(old_constraints, domain)
+        if abs(response) <= _DIVISION_TOLERANCE:
+            raise ValueError("that domain point is already constrained")
+
+        self._commit_wander(old_constraints)
+        correction_scale = (value - current_value) / response
+        vanishing_coefficients = _vanishing_coefficients(old_constraints)
+        for index, coefficient in enumerate(vanishing_coefficients):
+            self._anchor_polynomials[0][index] += correction_scale * coefficient
+
         constraint = ValueConstraint(domain=domain, value=value)
-        new_constraints = [*self._constraints, constraint]
-
-        interpolant = _interpolating_coefficients(new_constraints)
-        vanishing = _vanishing_coefficients(new_constraints)
-        residual = _subtract(constrained_coefficients, interpolant)
-        new_free = _divide_exact(residual, vanishing)
-        needed = self.maximum_degree + 1 - len(new_constraints)
-        new_free.extend([0j] * (needed - len(new_free)))
-
-        self._constraints = new_constraints
-        self._free_coefficients = new_free[:needed]
+        self._constraints.append(constraint)
         return constraint
 
     def lock_current_value(self, domain: complex) -> ValueConstraint:
-        """Freeze the current value at ``domain`` without changing this frame."""
+        """Freeze the current value at domain without changing this frame."""
 
         return self.constrain_value(domain, self.evaluate(domain))
 
     def step(self, frame_fraction: float = 1.0) -> bool:
-        """Advance the random walk; return whether the function can still move."""
-
-        free_count = self.remaining_complex_dimensions
-        if free_count == 0:
-            return False
         if frame_fraction < 0.0:
             raise ValueError("frame_fraction must be nonnegative")
         if frame_fraction == 0.0:
             return True
 
-        freedom_scale = sqrt(self.freedom_fraction)
-        noise_scale = self.wander_scale * freedom_scale * sqrt(frame_fraction)
-        restoring = min(1.0, self.restoring_strength * frame_fraction)
-
-        for index in range(free_count):
-            coefficient = self._free_coefficients[index]
-            coefficient *= 1.0 - restoring
-            coefficient += self._random_complex(noise_scale)
-            self._free_coefficients[index] = coefficient
+        damping = 0.985**frame_fraction
+        noise_scale = self.wander_scale * self.motion_scale * sqrt(frame_fraction)
+        for mode in range(len(self._wander)):
+            mode_scale = 1.0 / sqrt(mode + 1.0)
+            self._wander[mode] = (
+                damping * self._wander[mode]
+                + self._random_complex(noise_scale * mode_scale)
+            )
         return True
+
+    def _commit_wander(self, constraints: tuple[ValueConstraint, ...]) -> None:
+        vanishing_coefficients = _vanishing_coefficients(constraints)
+        for mode, wander in enumerate(self._wander):
+            for index, coefficient in enumerate(vanishing_coefficients):
+                self._anchor_polynomials[mode][index] += wander * coefficient
+            self._wander[mode] = 0j
 
     def _random_complex(self, scale: float) -> complex:
         return complex(
-            self._random.gauss(0.0, scale),
-            self._random.gauss(0.0, scale),
+            scale * (2.0 * self._random.random() - 1.0),
+            scale * (2.0 * self._random.random() - 1.0),
         )
