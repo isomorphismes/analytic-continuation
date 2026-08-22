@@ -96,8 +96,9 @@ coefficients or track branches. The Play workflow builds an installable debug
 APK for validation and a signed AAB while preserving the movie-rendering path.
 See [`docs/google-play-release.md`](docs/google-play-release.md).
 
-Direct test installs use an update-stable, test-only GitHub APK and conservative
-Android video encoding. See [`docs/github-apk-release.md`](docs/github-apk-release.md).
+Direct test installs use an update-stable, test-only GitHub APK that launches
+the live native explorer without video playback. See
+[`docs/github-apk-release.md`](docs/github-apk-release.md).
 
 ## Movie JSON
 

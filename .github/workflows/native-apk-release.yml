@@ -1,4 +1,4 @@
-name: Build, play, and publish native APK
+name: Build, touch, and publish native APK
 
 on:
   push:
@@ -7,11 +7,10 @@ on:
     paths:
       - '.github/workflows/native-apk-release.yml'
       - 'android/**'
-      - 'examples/rational_disc_reveal_smoke.json'
-      - 'examples/zeta_smoke.json'
-      - 'scripts/prepare_android_movies.sh'
-      - 'src/**'
-      - 'tests/**'
+      - 'tests/test_continuation_path.c'
+      - 'tests/test_factor_snap.c'
+      - 'tests/test_factor_state.c'
+      - 'tests/test_gesture_state.c'
   workflow_dispatch:
     inputs:
       release_version:
@@ -39,7 +38,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
@@ -50,21 +49,9 @@ jobs:
           [[ "$RELEASE_VERSION_CODE" =~ ^[1-9][0-9]*$ ]]
           test "$RELEASE_VERSION_CODE" -le 2100000000
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-
-      - name: Install renderer and media tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg libpango1.0-dev xvfb xauth libgl1-mesa-dri
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[movie]'
-
-      - name: Test Python and native interaction contracts
+      - name: Test native interaction contracts
         run: |
           set -euo pipefail
-          python -m unittest discover -s tests -v
           cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_continuation_path.c -lm -o /tmp/analytic-continuation-path-test
           /tmp/analytic-continuation-path-test
           cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_gesture_state.c -o /tmp/analytic-gesture-test
@@ -73,25 +60,6 @@ jobs:
           /tmp/analytic-factor-test
           cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_factor_snap.c -lm -o /tmp/analytic-snap-test
           /tmp/analytic-snap-test
-
-      - name: Render Android-compatible guided movies
-        env:
-          LIBGL_ALWAYS_SOFTWARE: '1'
-        run: |
-          set -euo pipefail
-          ANALYTIC_CONTINUATION_SPEC="$GITHUB_WORKSPACE/examples/zeta_smoke.json" \
-            xvfb-run -a manimgl \
-              src/analytic_continuation/scene.py FunctionOpenClose \
-              -w -l \
-              --video_dir rendered \
-              --file_name zeta-open-close
-          ANALYTIC_CONTINUATION_SPEC="$GITHUB_WORKSPACE/examples/rational_disc_reveal_smoke.json" \
-            xvfb-run -a manimgl \
-              src/analytic_continuation/scene.py FunctionOpenClose \
-              -w -l \
-              --video_dir rendered \
-              --file_name rational-disc-reveal
-          bash scripts/prepare_android_movies.sh rendered android/app/src/main/assets/movies
 
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -110,7 +78,7 @@ jobs:
           PLAY_VERSION_NAME: ${{ env.RELEASE_VERSION }}
         run: ./gradlew --no-daemon :app:assembleDebug
 
-      - name: Verify and name APK
+      - name: Verify native APK
         run: |
           set -euo pipefail
           source_apk=android/app/build/outputs/apk/debug/app-debug.apk
@@ -119,12 +87,13 @@ jobs:
           unzip -t "$source_apk"
           unzip -Z1 "$source_apk" > "$RUNNER_TEMP/apk-files.txt"
           grep -Fxq AndroidManifest.xml "$RUNNER_TEMP/apk-files.txt"
-          grep -Fxq assets/movies/zeta-open-close.mp4 "$RUNNER_TEMP/apk-files.txt"
-          grep -Fxq assets/movies/rational-disc-reveal.mp4 "$RUNNER_TEMP/apk-files.txt"
           grep -Fxq lib/arm64-v8a/libanalytic_continuation.so "$RUNNER_TEMP/apk-files.txt"
           grep -Fxq lib/armeabi-v7a/libanalytic_continuation.so "$RUNNER_TEMP/apk-files.txt"
           grep -Fxq lib/x86_64/libanalytic_continuation.so "$RUNNER_TEMP/apk-files.txt"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$source_apk" | grep -Fq "versionCode='${RELEASE_VERSION_CODE}' versionName='${RELEASE_VERSION}'"
+          ! grep -Eq '^assets/movies/.*[.]mp4$' "$RUNNER_TEMP/apk-files.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$source_apk" > "$RUNNER_TEMP/apk-badging.txt"
+          grep -Fq "versionCode='${RELEASE_VERSION_CODE}' versionName='${RELEASE_VERSION}'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -Fq "launchable-activity: name='org.isomorphisms.analyticcontinuation.ExplorerActivity'" "$RUNNER_TEMP/apk-badging.txt"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify \
             --verbose \
             --print-certs \
@@ -143,7 +112,7 @@ jobs:
   emulate:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -162,7 +131,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Play both movies and touch the GLES explorer
+      - name: Launch and touch the native explorer
         uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
         with:
           api-level: 34
@@ -175,35 +144,16 @@ jobs:
           script: |
             adb install -r "artifacts/analytic-continuation-${RELEASE_VERSION}.apk"
             adb logcat -c
-            adb shell am start -S -W -n org.isomorphisms.analyticcontinuation/.MainActivity --es play_movie rational-disc-reveal.mp4
-            timeout 20 bash -c 'until adb logcat -d | grep -Fq "movie rendering started: rational-disc-reveal.mp4"; do sleep 1; done'
-            sleep 1
-            adb logcat -d > rational-playback.log
-            adb exec-out screencap -p > rational-playback.png
-            grep -Fq 'movie prepared: rational-disc-reveal.mp4' rational-playback.log
-            grep -Fq 'movie rendering started: rational-disc-reveal.mp4' rational-playback.log
-            ! grep -Fq 'movie playback failed: rational-disc-reveal.mp4' rational-playback.log
-            ffmpeg -v error -i rational-playback.png -vf 'crop=iw*0.9:ih*0.28:iw*0.05:ih*0.36,signalstats,metadata=print:file=rational-screen-stats.txt' -frames:v 1 -f null -
-            awk -F= '/lavfi.signalstats.YAVG/ { average = $2 } /lavfi.signalstats.YMAX/ { maximum = $2 } END { exit !(average > 25.0 && maximum > 80.0) }' rational-screen-stats.txt
-            adb logcat -c
-            adb shell am start -S -W -n org.isomorphisms.analyticcontinuation/.MainActivity --es play_movie zeta-open-close.mp4
-            timeout 20 bash -c 'until adb logcat -d | grep -Fq "movie rendering started: zeta-open-close.mp4"; do sleep 1; done'
+            adb shell monkey -p org.isomorphisms.analyticcontinuation -c android.intent.category.LAUNCHER 1
+            timeout 20 bash -c 'until adb logcat -d | grep -Fq "continuation view enabled"; do sleep 1; done'
             sleep 2
-            adb logcat -d > zeta-playback.log
-            adb exec-out screencap -p > zeta-playback.png
-            grep -Fq 'movie prepared: zeta-open-close.mp4' zeta-playback.log
-            grep -Fq 'movie rendering started: zeta-open-close.mp4' zeta-playback.log
-            ! grep -Fq 'movie playback failed: zeta-open-close.mp4' zeta-playback.log
-            ffmpeg -v error -i zeta-playback.png -vf 'crop=iw*0.9:ih*0.28:iw*0.05:ih*0.36,signalstats,metadata=print:file=zeta-screen-stats.txt' -frames:v 1 -f null -
-            awk -F= '/lavfi.signalstats.YAVG/ { average = $2 } /lavfi.signalstats.YMAX/ { maximum = $2 } END { exit !(average > 25.0 && maximum > 80.0) }' zeta-screen-stats.txt
-            adb logcat -c
-            adb shell am start -S -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p org.isomorphisms.analyticcontinuation
-            sleep 4
             adb logcat -d > analytic-continuation-emulator.log
             adb exec-out screencap -p > analytic-continuation-emulator.png
             adb shell pidof -s org.isomorphisms.analyticcontinuation | tr -d '\r' | grep -Eq '^[0-9]+$'
             grep -Fq 'continuation view enabled' analytic-continuation-emulator.log
             grep -Eq 'continuation seeded at 0([.]0+)?\+0([.]0+)?i radius=1([.]0+)?' analytic-continuation-emulator.log
+            ffmpeg -v error -i analytic-continuation-emulator.png -vf 'signalstats,metadata=print:file=explorer-screen-stats.txt' -frames:v 1 -f null -
+            awk -F= '/lavfi.signalstats.YAVG/ { average = $2 } /lavfi.signalstats.YMAX/ { maximum = $2 } END { exit !(average > 20.0 && maximum > 80.0) }' explorer-screen-stats.txt
             adb shell input tap "$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print int(dimensions[1] / 2) }' analytic-continuation-emulator.log)" "$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print int(dimensions[2] / 2) }' analytic-continuation-emulator.log)"
             sleep 1
             adb logcat -d > analytic-continuation-emulator.log
@@ -218,12 +168,7 @@ jobs:
           path: |
             analytic-continuation-emulator.log
             analytic-continuation-emulator.png
-            rational-playback.log
-            rational-playback.png
-            rational-screen-stats.txt
-            zeta-playback.log
-            zeta-playback.png
-            zeta-screen-stats.txt
+            explorer-screen-stats.txt
           if-no-files-found: warn
 
   publish:
@@ -249,10 +194,10 @@ jobs:
         run: |
           set -euo pipefail
           release_tag="v${RELEASE_VERSION}"
-          release_title="Analytic Continuation Android test ${RELEASE_VERSION}"
-          release_notes="Corrected Android test APK from commit ${GITHUB_SHA}.
+          release_title="Analytic Continuation native Android test ${RELEASE_VERSION}"
+          release_notes="Corrected native Android APK from commit ${GITHUB_SHA}.
 
-          This replaces v0.1.0: the app now opens directly into the live native EGL/OpenGL ES convergence explorer with zero and infinity controls. Both guided movies are encoded as H.264 Constrained Baseline, and CI actually played and captured each movie in an Android emulator before publication.
+          This replaces the v0.1.0 movie viewer. It opens directly into the live EGL/OpenGL ES convergence explorer with editable zero and infinity controls; no movie playback is involved. CI installed, launched, captured, and touched this exact APK before publication.
 
           It uses the same repository test-only signing key as v0.1.0, so it can be installed as an update. It is not the separately signed Google Play production build."
 
@@ -281,6 +226,6 @@ jobs:
             gh release edit v0.1.0 \
               --repo "$GITHUB_REPOSITORY" \
               --title 'Superseded: Android test 0.1.0' \
-              --notes "This build has a known blank-movie playback problem on some Android devices. Use ${release_tag} instead." \
+              --notes "This movie-viewer build has a known blank-playback problem. Use the native explorer in ${release_tag} instead." \
               --prerelease
           fi
