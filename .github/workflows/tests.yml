@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
@@ -70,3 +75,12 @@ jobs:
           path: group-explorer-pr1-mobile-debug.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Report this build run on PR 17
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh pr comment 17 --repo isomorphisms/analytic-continuation \
+            --body "Group Explorer APK bridge run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
