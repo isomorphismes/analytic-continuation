@@ -21,6 +21,7 @@
 #include "factor_snap.h"
 #include "factor_state.h"
 #include "gesture_state.h"
+#include "perturbation_render.h"
 
 static const char *PLACEMENT_CONTROL_FRAGMENT_SHADER =
     "#version 300 es\n"
@@ -403,6 +404,9 @@ static bool create_renderer(struct engine *engine) {
         engine->program,
         "u_continuation_radii[0]"
     );
+    if (!perturbation_render_bind(engine->program)) {
+        LOGE("perturbation workers unavailable");
+    }
 
     GLuint placement_vertex_shader = compile_shader(GL_VERTEX_SHADER, VERTEX_SHADER);
     GLuint placement_fragment_shader = compile_shader(
@@ -606,6 +610,12 @@ static void draw_frame(struct engine *engine) {
         engine->continuation_radii_location,
         MAX_CONTINUATION_STEPS,
         engine->continuation.radii
+    );
+    perturbation_render_upload(
+        engine->center[0],
+        engine->center[1],
+        engine->half_height,
+        aspect
     );
 
     glBindVertexArray(engine->vao);
@@ -1084,7 +1094,11 @@ void android_main(struct android_app *app) {
     while (true) {
         int events = 0;
         struct android_poll_source *source = NULL;
-        int timeout = engine.dirty && engine.display != EGL_NO_DISPLAY ? 0 : -1;
+        bool vibrating = engine.display != EGL_NO_DISPLAY
+            && perturbation_render_is_running();
+        int timeout = engine.dirty && engine.display != EGL_NO_DISPLAY
+            ? 0
+            : (vibrating ? 16 : -1);
         int ident = ALooper_pollOnce(timeout, NULL, &events, (void **)&source);
 
         if (ident >= 0 && source != NULL) {
@@ -1092,11 +1106,15 @@ void android_main(struct android_app *app) {
         }
 
         if (app->destroyRequested != 0) {
+            perturbation_render_shutdown();
             terminate_display(&engine);
             return;
         }
 
-        if (engine.dirty) {
+        if (engine.dirty || (
+                engine.display != EGL_NO_DISPLAY
+                && perturbation_render_is_running()
+            )) {
             draw_frame(&engine);
         }
     }
