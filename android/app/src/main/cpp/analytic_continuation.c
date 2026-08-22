@@ -755,7 +755,7 @@ static bool pause_control_contains(const struct engine *engine, float x, float y
     return hypotf(x - center_x, y - center_y) <= radius;
 }
 
-static bool clear_control_contains(const struct engine *engine, float x, float y) {
+static bool close_control_contains(const struct engine *engine, float x, float y) {
     float radius = control_radius(engine);
     float center_x = (float)engine->width - radius - 16.0f;
     float center_y = radius + 16.0f;
@@ -884,12 +884,6 @@ static void add_zero(struct engine *engine, float x, float y) {
         preimage[1],
         engine->zero_count
     );
-}
-
-static void clear_zeros(struct engine *engine) {
-    engine->zero_count = 0;
-    engine->dirty = true;
-    LOGI("lasso zeros cleared");
 }
 
 static void begin_lasso_drag(struct engine *engine) {
@@ -1062,8 +1056,9 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
                 engine->moved = true;
                 return 1;
             }
-            if (clear_control_contains(engine, x, y)) {
-                clear_zeros(engine);
+            if (close_control_contains(engine, x, y)) {
+                LOGI("lasso close requested");
+                ANativeActivity_finish(app->activity);
                 clear_gesture(engine);
                 engine->moved = true;
                 return 1;
