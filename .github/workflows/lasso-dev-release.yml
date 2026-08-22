@@ -43,7 +43,7 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
           grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' /tmp/apksigner.txt
-          grep -Fiq 'SHA-256 digest: 17:71:80:CA:BE:DA:36:9A:BF:1C:B0:6B:12:DD:23:9C:18:6F:21:93:05:A3:2F:F2:45:1E:BD:51:73:7C:EB:8A' /tmp/apksigner.txt
+          grep -Fiq 'SHA-256 digest: 177180cabeda369abf1cb06b12dd239c186f219305a32ff2451ebd51737ceb8a' /tmp/apksigner.txt
 
       - name: Prepare public release assets
         run: |
@@ -64,4 +64,24 @@ jobs:
               --target "$GITHUB_SHA" \
               --title 'Lasso Dev v0.1.0' \
               --notes 'Public sideload build of the analytic-continuation lasso experiment. Package: org.isomorphisms.analyticcontinuation.lasso.dev. Signed with the repository’s permanent non-production sideload key so subsequent Lasso Dev builds can update in place.'
+          fi
+
+          gh release view "$TAG" --json url,tagName,isDraft,isPrerelease,publishedAt,targetCommitish > /tmp/lasso-dev-release.json
+          grep -Fq '"isDraft":false' /tmp/lasso-dev-release.json
+          grep -Fq '"tagName":"lasso-dev-v0.1.0"' /tmp/lasso-dev-release.json
+
+          CONTENT=$(base64 -w0 /tmp/lasso-dev-release.json)
+          PROOF_PATH='release-proof/lasso-dev-v0.1.0.json'
+          EXISTING_SHA=$(gh api "repos/$GITHUB_REPOSITORY/contents/$PROOF_PATH?ref=lasso" --jq .sha 2>/dev/null || true)
+          if [ -n "$EXISTING_SHA" ]; then
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$PROOF_PATH" \
+              -f message='Record public Lasso Dev release' \
+              -f content="$CONTENT" \
+              -f branch=lasso \
+              -f sha="$EXISTING_SHA" >/dev/null
+          else
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$PROOF_PATH" \
+              -f message='Record public Lasso Dev release' \
+              -f content="$CONTENT" \
+              -f branch=lasso >/dev/null
           fi
