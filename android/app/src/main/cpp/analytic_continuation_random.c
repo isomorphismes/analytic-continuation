@@ -247,6 +247,22 @@ static int32_t handle_zero_only_input(struct android_app *app, AInputEvent *even
             float y = AMotionEvent_getY(event, 0);
             if (!engine->moved && !engine->dragging_factor && !engine->dragging_lasso) {
                 add_factor(engine, PLACEMENT_ZERO, x, y);
+            } else if (engine->dragging_factor && engine->candidate_kind != FACTOR_NONE) {
+                const char *name = engine->candidate_kind == FACTOR_ZERO ? "zero" : "infinity";
+                float (*positions)[2] = engine->candidate_kind == FACTOR_ZERO
+                    ? engine->zero_positions : engine->pole_positions;
+                LOGI(
+                    "%s moved: index=%d z=%.6g%+.6gi",
+                    name,
+                    engine->candidate_index,
+                    positions[engine->candidate_index][0],
+                    positions[engine->candidate_index][1]
+                );
+            } else if (engine->dragging_lasso) {
+                LOGI(
+                    "lasso drag finished: budget=%.4f",
+                    lasso_derivative_budget(engine->lasso_coefficients)
+                );
             }
             clear_gesture(engine);
             if (deformation_workers_started) {
