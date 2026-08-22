@@ -226,8 +226,8 @@ class UnderdeterminedPolynomialFamily:
     def evaluate(self, domain: complex) -> complex:
         return evaluate_coefficients(self.coefficients, domain)
 
-    def lock_current_value(self, domain: complex) -> ValueConstraint:
-        """Freeze the current value at ``domain`` without changing this frame."""
+    def constrain_value(self, domain: complex, value: complex) -> ValueConstraint:
+        """Add an exact value constraint while preserving every older constraint."""
 
         if self.remaining_complex_dimensions == 0:
             raise ValueError("the polynomial family is already fully determined")
@@ -236,15 +236,23 @@ class UnderdeterminedPolynomialFamily:
                 raise ValueError("that domain point is already constrained")
 
         current_coefficients = self.coefficients
-        constraint = ValueConstraint(
-            domain=domain,
-            value=evaluate_coefficients(current_coefficients, domain),
+        current_value = evaluate_coefficients(current_coefficients, domain)
+        old_vanishing = _vanishing_coefficients(self._constraints)
+        response_at_domain = evaluate_coefficients(old_vanishing, domain)
+        if abs(response_at_domain) <= _DUPLICATE_POINT_TOLERANCE:
+            raise ValueError("that domain point is already constrained")
+
+        correction = _scale(
+            old_vanishing,
+            (value - current_value) / response_at_domain,
         )
+        constrained_coefficients = _add(current_coefficients, correction)
+        constraint = ValueConstraint(domain=domain, value=value)
         new_constraints = [*self._constraints, constraint]
 
         interpolant = _interpolating_coefficients(new_constraints)
         vanishing = _vanishing_coefficients(new_constraints)
-        residual = _subtract(current_coefficients, interpolant)
+        residual = _subtract(constrained_coefficients, interpolant)
         new_free = _divide_exact(residual, vanishing)
         needed = self.maximum_degree + 1 - len(new_constraints)
         new_free.extend([0j] * (needed - len(new_free)))
@@ -252,6 +260,11 @@ class UnderdeterminedPolynomialFamily:
         self._constraints = new_constraints
         self._free_coefficients = new_free[:needed]
         return constraint
+
+    def lock_current_value(self, domain: complex) -> ValueConstraint:
+        """Freeze the current value at ``domain`` without changing this frame."""
+
+        return self.constrain_value(domain, self.evaluate(domain))
 
     def step(self, frame_fraction: float = 1.0) -> bool:
         """Advance the random walk; return whether the function can still move."""
