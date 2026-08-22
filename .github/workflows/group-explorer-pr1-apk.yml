@@ -1,0 +1,70 @@
+name: Group Explorer PR 1 APK
+
+on:
+  push:
+    branches:
+      - ci/group-explorer-pr1-apk
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Fetch Group Explorer wrapper branch
+        shell: bash
+        run: |
+          git clone --branch mobile-apk --single-branch --depth 1 \
+            https://github.com/isomorphisms/group-explorer.git group-explorer
+          cd group-explorer
+          test "$(git rev-parse HEAD)" = "0ed6dcfb6a7f579b28dbd0ee06ccc78c744d0028"
+          npm test
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build APK
+        working-directory: group-explorer/android-app
+        shell: bash
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify packaged PR 1 assets
+        shell: bash
+        run: |
+          APK=group-explorer/android-app/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep -F "assets/site/GroupExplorer.html"
+          unzip -l "$APK" | grep -F "assets/site/style/mobile.css"
+          unzip -l "$APK" | grep -F "assets/site/visualizerFramework/visualizer.md"
+          cp "$APK" group-explorer-pr1-mobile-debug.apk
+          sha256sum group-explorer-pr1-mobile-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: group-explorer-pr1-mobile-apk
+          path: group-explorer-pr1-mobile-debug.apk
+          if-no-files-found: error
+          retention-days: 30
