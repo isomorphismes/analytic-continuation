@@ -30,6 +30,21 @@ class CompletionTests(unittest.TestCase):
                 places=10,
             )
 
+    def test_exact_new_value_keeps_older_values_fixed(self) -> None:
+        family = UnderdeterminedPolynomialFamily(maximum_degree=4, random_seed=5)
+        first = family.constrain_value(-0.5 + 0.2j, 0.0 + 0.0j)
+        second = family.constrain_value(0.6 - 0.1j, 1.0 + 0.0j)
+
+        for _ in range(80):
+            family.step()
+
+        self.assertAlmostEqual(abs(family.evaluate(first.domain)), 0.0, places=9)
+        self.assertAlmostEqual(
+            abs(family.evaluate(second.domain) - 1.0),
+            0.0,
+            places=9,
+        )
+
     def test_locking_a_point_does_not_jump_the_current_function(self) -> None:
         family = UnderdeterminedPolynomialFamily(random_seed=4)
         before = family.coefficients
