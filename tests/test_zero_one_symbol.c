@@ -13,6 +13,11 @@ int main(void) {
     struct completion_state state;
     completion_state_initialize(&state, 11u);
 
+    struct completion_state tap_state;
+    completion_state_initialize(&tap_state, 13u);
+    const float tap_domain[2] = {0.25f, -0.35f};
+    assert(completion_lock_current_value(&tap_state, tap_domain));
+
     const float zero_domain[2] = {-0.75f, 0.20f};
     const float one_domain[2] = {0.90f, -0.15f};
     const float zero[2] = {0.0f, 0.0f};
