@@ -3,7 +3,9 @@ package org.isomorphisms.analyticcontinuation;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.media.MediaPlayer;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -19,8 +21,12 @@ import java.io.InputStream;
 import java.util.Arrays;
 
 public final class MainActivity extends Activity {
+    private static final String LOG_TAG = "AnalyticContinuation";
+    private static final String PLAY_MOVIE_EXTRA = "play_movie";
+
     private VideoView videoView;
     private TextView statusView;
+    private String currentMovieAssetName;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -79,6 +85,11 @@ public final class MainActivity extends Activity {
         videoView.setBackgroundColor(Color.BLACK);
         videoView.setOnCompletionListener(player -> statusView.setText("Tap a movie to replay it."));
         videoView.setOnErrorListener((player, what, extra) -> {
+            Log.e(
+                LOG_TAG,
+                "movie playback failed: " + currentMovieAssetName +
+                    " what=" + what + " extra=" + extra
+            );
             statusView.setText("This movie could not be played on this device.");
             return true;
         });
@@ -116,6 +127,8 @@ public final class MainActivity extends Activity {
             Arrays.sort(assetNames);
 
             int movieCount = 0;
+            String requestedMovie = getIntent().getStringExtra(PLAY_MOVIE_EXTRA);
+            String movieToPlay = null;
             for (String assetName : assetNames) {
                 if (!assetName.endsWith(".mp4")) {
                     continue;
@@ -126,12 +139,18 @@ public final class MainActivity extends Activity {
                 button.setAllCaps(false);
                 button.setOnClickListener(view -> playMovie(assetName));
                 movieButtons.addView(button);
+                if (assetName.equals(requestedMovie)) {
+                    movieToPlay = assetName;
+                }
             }
 
             if (movieCount == 0) {
                 statusView.setText("Live explorer ready; this build contains no rendered movies.");
             } else {
                 statusView.setText("Explore live or choose a guided movie.");
+            }
+            if (movieToPlay != null) {
+                playMovie(movieToPlay);
             }
         } catch (IOException exception) {
             statusView.setText("The packaged movie list could not be read.");
@@ -141,10 +160,22 @@ public final class MainActivity extends Activity {
     private void playMovie(String assetName) {
         try {
             File cachedMovie = copyMovieToCache(assetName);
-            statusView.setText(displayName(assetName));
+            currentMovieAssetName = assetName;
+            statusView.setText("Preparing " + displayName(assetName));
+            videoView.setOnInfoListener((player, what, extra) -> {
+                if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
+                    statusView.setText("Playing " + displayName(assetName));
+                    Log.i(LOG_TAG, "movie rendering started: " + assetName);
+                }
+                return false;
+            });
             videoView.setVideoPath(cachedMovie.getAbsolutePath());
             videoView.setOnPreparedListener(player -> {
                 player.setLooping(false);
+                Log.i(
+                    LOG_TAG,
+                    "movie prepared: " + assetName + " duration_ms=" + player.getDuration()
+                );
                 videoView.start();
             });
         } catch (IOException exception) {

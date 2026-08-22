@@ -22,6 +22,10 @@ val uploadSigningConfigured = listOf(
     uploadKeyPassword,
 ).all { !it.isNullOrBlank() }
 
+// Public direct-install signing stays separate from private Google Play upload signing.
+val githubTestKeystore = file("analytic-continuation-github-test.p12")
+val githubTestKeyPassword = "analytic-continuation-test"
+
 android {
     namespace = "org.isomorphisms.analyticcontinuation"
     compileSdk = 36
@@ -46,6 +50,13 @@ android {
     }
 
     signingConfigs {
+        getByName("debug") {
+            storeFile = githubTestKeystore
+            storePassword = githubTestKeyPassword
+            keyAlias = "analytic-continuation-test"
+            keyPassword = githubTestKeyPassword
+        }
+
         if (uploadSigningConfigured) {
             create("playUpload") {
                 storeFile = file(uploadKeystorePath!!)

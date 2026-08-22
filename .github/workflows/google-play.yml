@@ -200,11 +200,7 @@ jobs:
               -w -l \
               --video_dir rendered \
               --file_name rational-disc-reveal
-          mkdir -p play-movies
-          find rendered -type f -name 'zeta-open-close.mp4' -exec cp '{}' play-movies/ \;
-          find rendered -type f -name 'rational-disc-reveal.mp4' -exec cp '{}' play-movies/ \;
-          test -s play-movies/zeta-open-close.mp4
-          test -s play-movies/rational-disc-reveal.mp4
+          bash scripts/prepare_android_movies.sh rendered play-movies
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
