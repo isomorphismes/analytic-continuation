@@ -8,6 +8,10 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+        <activity
             android:name=".ExplorerActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|density"
             android:exported="true"
