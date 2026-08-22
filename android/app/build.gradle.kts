@@ -9,7 +9,7 @@ val appVersionCode = when {
         ?.takeIf { it in 1..2_100_000_000 }
         ?: error("PLAY_VERSION_CODE must be between 1 and 2100000000")
 }
-val appVersionName = System.getenv("PLAY_VERSION_NAME") ?: "0.1.0"
+val appVersionName = System.getenv("PLAY_VERSION_NAME") ?: "0.1.0-lasso"
 
 val uploadKeystorePath = System.getenv("ANDROID_UPLOAD_KEYSTORE_PATH")
 val uploadKeystorePassword = System.getenv("ANDROID_UPLOAD_KEYSTORE_PASSWORD")
@@ -28,7 +28,8 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "org.isomorphisms.analyticcontinuation"
+        // Keep the experiment installable beside the main explorer.
+        applicationId = "org.isomorphisms.analyticcontinuation.lasso"
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode
