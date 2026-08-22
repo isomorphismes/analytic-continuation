@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - underdetermined-vibrating-domain
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
