@@ -149,7 +149,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
           script: |
-            set -euo pipefail
+            set -eu
             apk="artifacts/analytic-continuation-${RELEASE_VERSION}.apk"
             adb install -r "$apk"
             adb logcat -c
