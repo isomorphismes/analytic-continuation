@@ -60,8 +60,7 @@ vec2 reduce_to_fundamental_domain(vec2 tau) {
     return tau;
 }
 
-vec2 modular_j(vec2 tau) {
-    vec2 reduced_tau = reduce_to_fundamental_domain(tau);
+vec2 modular_j_from_reduced_tau(vec2 reduced_tau) {
     float q_modulus = exp(-TWO_PI * reduced_tau.y);
     float q_phase = TWO_PI * reduced_tau.x;
     vec2 q = q_modulus * vec2(cos(q_phase), sin(q_phase));
@@ -129,9 +128,19 @@ void main() {
         return;
     }
 
-    vec2 value = modular_j(tau);
-    float phase = atan(value.y, value.x);
-    float log_modulus = log(max(length(value), 1.0e-20));
+    vec2 reduced_tau = reduce_to_fundamental_domain(tau);
+    float phase;
+    float log_modulus;
+    if (reduced_tau.y > 8.0) {
+        // At a cusp j = q^-1 + O(1). Stay in log-polar form instead of
+        // overflowing highp float by constructing q^-1.
+        phase = -TWO_PI * reduced_tau.x;
+        log_modulus = TWO_PI * reduced_tau.y;
+    } else {
+        vec2 value = modular_j_from_reduced_tau(reduced_tau);
+        phase = atan(value.y, value.x);
+        log_modulus = log(max(length(value), 1.0e-20));
+    }
     float hue_degrees = 360.0 * positive_fract(phase / TWO_PI);
     float log_modulus_band = positive_fract(log_modulus / LOG_10);
     float lightness = 66.0
