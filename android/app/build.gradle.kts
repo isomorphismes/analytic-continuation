@@ -25,6 +25,7 @@ val uploadSigningConfigured = listOf(
 android {
     namespace = "org.isomorphisms.analyticcontinuation"
     compileSdk = 36
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "org.isomorphisms.analyticcontinuation"
@@ -32,6 +33,16 @@ android {
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_STL=none")
+            }
+        }
     }
 
     signingConfigs {
@@ -51,6 +62,13 @@ android {
             signingConfigs.findByName("playUpload")?.let {
                 signingConfig = it
             }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 }

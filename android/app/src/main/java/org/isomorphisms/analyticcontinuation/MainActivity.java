@@ -1,6 +1,7 @@
 package org.isomorphisms.analyticcontinuation;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -36,6 +37,30 @@ public final class MainActivity extends Activity {
         title.setTextSize(24);
         title.setGravity(Gravity.CENTER_HORIZONTAL);
         page.addView(title, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        Button exploreButton = new Button(this);
+        exploreButton.setText("Explore convergence discs live");
+        exploreButton.setAllCaps(false);
+        exploreButton.setOnClickListener(view -> startActivity(
+            new Intent(this, ExplorerActivity.class)
+        ));
+        LinearLayout.LayoutParams exploreLayout = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        exploreLayout.setMargins(0, dp(10), 0, dp(4));
+        page.addView(exploreButton, exploreLayout);
+
+        TextView exploreHint = new TextView(this);
+        exploreHint.setText("Place zeros or ∞, then reveal overlapping Taylor discs.");
+        exploreHint.setTextColor(Color.rgb(183, 189, 202));
+        exploreHint.setTextSize(14);
+        exploreHint.setGravity(Gravity.CENTER_HORIZONTAL);
+        exploreHint.setPadding(0, 0, 0, dp(8));
+        page.addView(exploreHint, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ));
@@ -104,9 +129,9 @@ public final class MainActivity extends Activity {
             }
 
             if (movieCount == 0) {
-                statusView.setText("This validation build contains no rendered movies.");
+                statusView.setText("Live explorer ready; this build contains no rendered movies.");
             } else {
-                statusView.setText("Choose a function movie.");
+                statusView.setText("Explore live or choose a guided movie.");
             }
         } catch (IOException exception) {
             statusView.setText("The packaged movie list could not be read.");
