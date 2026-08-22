@@ -8,7 +8,7 @@ add_library(native_app_glue STATIC
 )
 target_include_directories(native_app_glue PUBLIC "${NATIVE_GLUE_DIR}")
 
-add_library(analytic_continuation SHARED analytic_continuation.c)
+add_library(analytic_continuation SHARED analytic_continuation_completion.c)
 target_compile_features(analytic_continuation PRIVATE c_std_11)
 target_compile_options(analytic_continuation PRIVATE -Wall -Wextra -Wpedantic)
 target_link_options(analytic_continuation PRIVATE -u ANativeActivity_onCreate)
