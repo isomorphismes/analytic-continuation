@@ -1,0 +1,98 @@
+name: Publish Lasso Dev Public Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/lasso-dev-public-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lasso-dev-public-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out current lasso head
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: lasso
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install native Android toolchain
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Build Lasso Dev APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Verify install channel and Android signature
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' /tmp/apksigner.txt
+          "$AAPT2" dump badging "$APK" | grep -Fq "package: name='org.isomorphisms.analyticcontinuation.lasso.dev'"
+          unzip -l "$APK" | grep -Eq 'res/(mipmap|drawable).*(ic_launcher|ic_lasso)'
+
+      - name: Prepare release assets
+        run: |
+          set -euo pipefail
+          cp android/app/build/outputs/apk/debug/app-debug.apk analytic-continuation-lasso-dev.apk
+          sha256sum analytic-continuation-lasso-dev.apk > analytic-continuation-lasso-dev.apk.sha256
+          unzip -t analytic-continuation-lasso-dev.apk
+
+      - name: Publish and verify public GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=lasso-dev-v0.1.0
+          LASSO_SHA=$(git rev-parse HEAD)
+          RELEASE_TITLE='Lasso Dev v0.1.0'
+          RELEASE_NOTES="Public sideload build of the analytic-continuation lasso experiment from lasso commit ${LASSO_SHA}.
+
+          Package: org.isomorphisms.analyticcontinuation.lasso.dev
+
+          This APK uses the repository's permanent non-production sideload signing key so later Lasso Dev APKs can update it in place. It is separate from the production/Play signing channel."
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          fi
+
+          gh release create "$TAG" \
+            analytic-continuation-lasso-dev.apk \
+            analytic-continuation-lasso-dev.apk.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$LASSO_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes "$RELEASE_NOTES"
+
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json url,tagName,isDraft,isPrerelease,publishedAt,targetCommitish,assets \
+            > /tmp/lasso-dev-release.json
+
+          jq -e --arg expected "$LASSO_SHA" '
+            .isDraft == false and
+            .isPrerelease == false and
+            .tagName == "lasso-dev-v0.1.0" and
+            .targetCommitish == $expected and
+            ([.assets[].name] | index("analytic-continuation-lasso-dev.apk") != null) and
+            ([.assets[].name] | index("analytic-continuation-lasso-dev.apk.sha256") != null)
+          ' /tmp/lasso-dev-release.json
+          cat /tmp/lasso-dev-release.json
