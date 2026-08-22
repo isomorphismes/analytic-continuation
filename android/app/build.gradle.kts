@@ -6,12 +6,12 @@ plugins {
 
 val requestedVersionCode = System.getenv("PLAY_VERSION_CODE")
 val appVersionCode = when {
-    requestedVersionCode == null -> 2
+    requestedVersionCode == null -> 3
     else -> requestedVersionCode.toIntOrNull()
         ?.takeIf { it in 1..2_100_000_000 }
         ?: error("PLAY_VERSION_CODE must be between 1 and 2100000000")
 }
-val appVersionName = System.getenv("PLAY_VERSION_NAME") ?: "0.1.1-lasso"
+val appVersionName = System.getenv("PLAY_VERSION_NAME") ?: "0.1.2-lasso"
 
 val uploadKeystorePath = System.getenv("ANDROID_UPLOAD_KEYSTORE_PATH")
 val uploadKeystorePassword = System.getenv("ANDROID_UPLOAD_KEYSTORE_PASSWORD")
