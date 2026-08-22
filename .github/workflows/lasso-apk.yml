@@ -64,13 +64,7 @@ jobs:
           name: analytic-continuation-lasso-apk
           path: artifacts
 
-      - name: Enable KVM permissions
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Launch, add a zero, and pause the phase walk
+      - name: Launch, deform the lasso, add a zero, and pause the phase walk
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -87,11 +81,30 @@ jobs:
             sleep 3
             adb logcat -d > lasso-emulator.log
             grep -Fq 'lasso ready:' lasso-emulator.log
+            grep -Fq 'outside=domain-coloring' lasso-emulator.log
             grep -Fq 'lasso first frame:' lasso-emulator.log
-            adb shell input tap "$(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1/p' lasso-emulator.log | tail -1 | awk '{print int($1 / 2)}')" "$(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\2/p' lasso-emulator.log | tail -1 | awk '{print int($1 / 2)}')"
+
+            WIDTH="$(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1/p' lasso-emulator.log | tail -1)"
+            HEIGHT="$(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\2/p' lasso-emulator.log | tail -1)"
+            MIN_SIDE="$WIDTH"
+            if [ "$HEIGHT" -lt "$WIDTH" ]; then MIN_SIDE="$HEIGHT"; fi
+            RADIUS="$(awk -v side="$MIN_SIDE" 'BEGIN { print int(0.42 * side) }')"
+            CENTER_X="$((WIDTH / 2))"
+            CENTER_Y="$((HEIGHT / 2))"
+            START_Y="$((CENTER_Y - RADIUS))"
+            END_Y="$((START_Y - 70))"
+
+            adb shell input swipe "$CENTER_X" "$START_Y" "$CENTER_X" "$END_Y" 500
+            sleep 1
+            adb logcat -d > lasso-emulator.log
+            grep -Fq 'lasso deformed:' lasso-emulator.log
+            grep -Fq 'lasso drag finished:' lasso-emulator.log
+
+            adb shell input tap "$CENTER_X" "$CENTER_Y"
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'zero added:' lasso-emulator.log
+
             adb shell input tap 52 52
             sleep 1
             adb logcat -d > lasso-emulator.log
