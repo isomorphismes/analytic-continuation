@@ -109,9 +109,6 @@ void main() {
     vec2 w = inverse_lasso(z);
     float w_radius = length(w);
 
-    // Multiply the Blaschke factors directly. This preserves the phase and
-    // modulus while avoiding two atan() and two log() calls per zero, which
-    // is substantially easier on older PowerVR Android drivers.
     vec2 phase_product = vec2(1.0, 0.0);
     float modulus_product = 1.0;
 
@@ -140,8 +137,6 @@ void main() {
     float log_modulus_band = positive_fract(log_modulus / LOG_10);
     vec3 color = domain_color(hue, log_modulus_band);
 
-    // psi maps |w|=1 to the deformable lasso. The accepted CPU-side
-    // deformation still enforces the same injectivity and zero constraints.
     vec2 unit_w = w_radius > 1.0e-6 ? w / w_radius : vec2(1.0, 0.0);
     vec2 boundary_derivative;
     lasso_map_and_derivative(unit_w, 1.0, boundary_derivative);
@@ -161,7 +156,6 @@ void main() {
         color = mix(color, vec3(0.98), inner);
     }
 
-    // Keep app controls clear of Android's right-edge navigation strip.
     float control_radius = clamp(0.052 * min(u_resolution.x, u_resolution.y), 28.0, 42.0);
     vec2 pause_center = vec2(
         control_radius + 16.0,
