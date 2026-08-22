@@ -48,11 +48,20 @@ jobs:
       - name: Install native Android toolchain
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
-      - name: Verify pinch zoom is wired through CPU and GPU
+      - name: Verify intended lasso interaction is wired
         run: |
+          grep -Fq 'engine->zero_count = 1;' android/app/src/main/cpp/analytic_continuation.c
+          grep -Fq 'PLACEMENT_INFINITY' android/app/src/main/cpp/analytic_continuation.c
           grep -Fq 'engine->zoom' android/app/src/main/cpp/analytic_continuation.c
-          grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag
           grep -Fq 'AMOTION_EVENT_ACTION_POINTER_DOWN' android/app/src/main/cpp/analytic_continuation.c
+          grep -Fq 'u_pole_count' android/app/src/main/assets/continuation.frag
+          grep -Fq 'u_placement_kind' android/app/src/main/assets/continuation.frag
+          grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag
+          grep -Fq 'vec3 hcl_to_srgb' android/app/src/main/assets/continuation.frag
+          grep -Fq 'vec3 color = hcl_to_srgb(hue_degrees, 45.0, lightness);' android/app/src/main/assets/continuation.frag
+          ! grep -Fq 'close_control_contains' android/app/src/main/cpp/analytic_continuation.c
+          ! grep -Fq 'close_center' android/app/src/main/assets/continuation.frag
+          ! grep -Fq 'ANativeActivity_finish' android/app/src/main/cpp/analytic_continuation.c
 
       - name: Build lasso APK
         working-directory: android
@@ -104,7 +113,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Launch, pause, deform, add a zero, and close
+      - name: Launch, pause, deform, and place zero and infinity
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -122,6 +131,7 @@ jobs:
             sleep 3
             adb logcat -d > lasso-emulator.log
             grep -Fq 'lasso ready:' lasso-emulator.log
+            grep -Fq 'zeros=1 poles=0 placement=zero' lasso-emulator.log
             grep -Fq 'outside=domain-coloring' lasso-emulator.log
             grep -Fq 'lasso first frame:' lasso-emulator.log
 
@@ -136,17 +146,27 @@ jobs:
             grep -Fq 'lasso deformed:' lasso-emulator.log
             grep -Fq 'lasso drag finished:' lasso-emulator.log
 
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; adb shell input tap "$((width / 2))" "$((height / 2))"
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; placement_radius=$((48 * min_side / 1000)); if [ "$placement_radius" -lt 26 ]; then placement_radius=26; fi; if [ "$placement_radius" -gt 38 ]; then placement_radius=38; fi; adb shell input tap "$((placement_radius + 16))" "$((height - placement_radius - 16))"
+            sleep 1
+            adb logcat -d > lasso-emulator.log
+            grep -Fq 'placement selected: zero' lasso-emulator.log
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); adb shell input tap "$((width / 2 + lasso_radius / 3))" "$((height / 2))"
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'zero added:' lasso-emulator.log
-            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable' lasso-emulator.log
-            adb exec-out screencap -p > lasso-emulator.png
+            grep -Fq 'count=2' lasso-emulator.log
 
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; control_radius=$((52 * min_side / 1000)); if [ "$control_radius" -lt 28 ]; then control_radius=28; fi; if [ "$control_radius" -gt 42 ]; then control_radius=42; fi; adb shell input tap "$((width - 4 * control_radius - 16))" "$((control_radius + 16))"
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; placement_radius=$((48 * min_side / 1000)); if [ "$placement_radius" -lt 26 ]; then placement_radius=26; fi; if [ "$placement_radius" -gt 38 ]; then placement_radius=38; fi; zero_x=$((placement_radius + 16)); infinity_x=$((zero_x + 2 * placement_radius + 14)); adb shell input tap "$infinity_x" "$((height - placement_radius - 16))"
             sleep 1
             adb logcat -d > lasso-emulator.log
-            grep -Fq 'lasso close requested' lasso-emulator.log
+            grep -Fq 'placement selected: infinity' lasso-emulator.log
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); adb shell input tap "$((width / 2))" "$((height / 2 + lasso_radius / 3))"
+            sleep 1
+            adb logcat -d > lasso-emulator.log
+            grep -Fq 'infinity added:' lasso-emulator.log
+            grep -Fq 'count=1' lasso-emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable' lasso-emulator.log
+            adb exec-out screencap -p > lasso-emulator.png
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
