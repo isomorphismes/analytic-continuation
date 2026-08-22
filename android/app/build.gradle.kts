@@ -22,6 +22,7 @@ val uploadSigningConfigured = listOf(
     uploadKeyPassword,
 ).all { !it.isNullOrBlank() }
 
+// Public direct-install signing stays separate from private Google Play upload signing.
 val githubTestKeystore = file("analytic-continuation-github-test.p12")
 val githubTestKeyPassword = "analytic-continuation-test"
 
