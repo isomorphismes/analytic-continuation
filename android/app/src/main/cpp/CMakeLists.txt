@@ -10,6 +10,7 @@ target_include_directories(native_app_glue PUBLIC "${NATIVE_GLUE_DIR}")
 
 add_library(analytic_continuation SHARED
     analytic_continuation.c
+    perturbation_render.c
     perturbation_workers.c
 )
 target_compile_features(analytic_continuation PRIVATE c_std_11)
