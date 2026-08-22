@@ -12,7 +12,9 @@ static GLint completion_center_location = -1;
 static GLint completion_half_height_location = -1;
 static GLint completion_aspect_location = -1;
 static GLint completion_resolution_location = -1;
-static GLint completion_coefficients_location = -1;
+static GLint completion_mode_frequencies_location = -1;
+static GLint completion_anchor_polynomials_location = -1;
+static GLint completion_wander_location = -1;
 static GLint completion_constraint_count_location = -1;
 static GLint completion_constraint_domains_location = -1;
 static GLint completion_constraint_values_location = -1;
@@ -58,8 +60,12 @@ static bool create_completion_renderer(struct engine *engine) {
         glGetUniformLocation(completion_program, "u_aspect");
     completion_resolution_location =
         glGetUniformLocation(completion_program, "u_resolution");
-    completion_coefficients_location =
-        glGetUniformLocation(completion_program, "u_completion_coefficients[0]");
+    completion_mode_frequencies_location =
+        glGetUniformLocation(completion_program, "u_mode_frequencies[0]");
+    completion_anchor_polynomials_location =
+        glGetUniformLocation(completion_program, "u_anchor_polynomials[0]");
+    completion_wander_location =
+        glGetUniformLocation(completion_program, "u_wander[0]");
     completion_constraint_count_location =
         glGetUniformLocation(completion_program, "u_constraint_count");
     completion_constraint_domains_location =
@@ -74,9 +80,10 @@ static bool create_completion_renderer(struct engine *engine) {
         glGetUniformLocation(completion_program, "u_preview_one_domain");
 
     LOGI(
-        "vibrating completion dot-line renderer ready: program=%u coefficients=%d constraints=%d values=%d",
+        "vibrating analytic completion dot-line renderer ready: program=%u modes=%d anchors=%d constraints=%d values=%d",
         completion_program,
-        completion_coefficients_location,
+        completion_mode_frequencies_location,
+        completion_anchor_polynomials_location,
         completion_constraint_domains_location,
         completion_constraint_values_location
     );
@@ -116,9 +123,19 @@ static void draw_completion_frame(struct engine *engine) {
         (float)engine->height
     );
     glUniform2fv(
-        completion_coefficients_location,
-        MAX_COMPLETION_COEFFICIENTS,
-        &COMPLETION.coefficients[0][0]
+        completion_mode_frequencies_location,
+        MAX_ANALYTIC_MODES,
+        &COMPLETION.mode_frequencies[0][0]
+    );
+    glUniform2fv(
+        completion_anchor_polynomials_location,
+        MAX_ANALYTIC_MODES * MAX_ANCHOR_COEFFICIENTS,
+        &COMPLETION.anchor_polynomials[0][0][0]
+    );
+    glUniform2fv(
+        completion_wander_location,
+        MAX_ANALYTIC_MODES,
+        &COMPLETION.wander[0][0]
     );
     glUniform1i(
         completion_constraint_count_location,
@@ -166,7 +183,7 @@ static void reset_completion_experiment(struct engine *engine) {
     engine->center[1] = 0.0f;
     engine->half_height = 3.5f;
     engine->dirty = true;
-    LOGI("vibrating completion reset");
+    LOGI("vibrating analytic completion reset");
 }
 
 static void set_completion_preview(
@@ -319,16 +336,17 @@ static int32_t handle_completion_input(
                             one_domain
                         )) {
                         LOGI(
-                            "completion zero-one symbol added: zero=%.6g%+.6gi one=%.6g%+.6gi; %d complex dimensions remain",
+                            "completion zero-one symbol added: zero=%.6g%+.6gi one=%.6g%+.6gi; %d constraints; motion scale %.3f",
                             zero_domain[0],
                             zero_domain[1],
                             one_domain[0],
                             one_domain[1],
-                            completion_remaining_complex_dimensions(&COMPLETION)
+                            COMPLETION.constraint_count,
+                            completion_motion_scale(&COMPLETION)
                         );
                     } else {
                         LOGI(
-                            "completion zero-one symbol ignored: need two free dimensions and distinct unused endpoints"
+                            "completion zero-one symbol ignored: need two unused constraint slots and distinct unused endpoints"
                         );
                     }
                 } else {
@@ -342,15 +360,15 @@ static int32_t handle_completion_input(
 
                     if (completion_lock_current_value(&COMPLETION, domain)) {
                         LOGI(
-                            "completion point %d locked at %.6g%+.6gi; %d complex dimensions remain",
+                            "completion point %d locked at %.6g%+.6gi; motion scale %.3f",
                             COMPLETION.constraint_count,
                             domain[0],
                             domain[1],
-                            completion_remaining_complex_dimensions(&COMPLETION)
+                            completion_motion_scale(&COMPLETION)
                         );
                     } else {
                         LOGI(
-                            "completion point ignored: family already fixed or point repeated"
+                            "completion point ignored: constraint storage full or point repeated"
                         );
                     }
                 }
@@ -393,7 +411,7 @@ static void handle_completion_command(
         completion_program == 0
     ) {
         if (!create_completion_renderer(engine)) {
-            LOGE("vibrating completion dot-line renderer unavailable; using base explorer");
+            LOGE("vibrating analytic completion dot-line renderer unavailable; using base explorer");
         }
         engine->dirty = true;
     }
@@ -420,8 +438,7 @@ void android_main(struct android_app *app) {
     while (true) {
         bool can_animate =
             engine.display != EGL_NO_DISPLAY &&
-            completion_program != 0 &&
-            completion_remaining_complex_dimensions(&COMPLETION) > 0;
+            completion_program != 0;
 
         int events = 0;
         struct android_poll_source *source = NULL;
