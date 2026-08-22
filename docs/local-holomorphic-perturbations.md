@@ -2,11 +2,11 @@
 
 ## Goal
 
-Start from a holomorphic function already being domain-colored and make many small random visible changes without ever leaving the holomorphic family.
+Start from a holomorphic or meromorphic function already being domain-colored and make small random visible changes while every displayed frame still represents an explicitly holomorphic perturbation of that function.
 
-Do not choose one finite-dimensional global coefficient space for the vibration. Instead, repeatedly choose a point in the visible domain and generate a small holomorphic perturbation associated with that point.
+Do not choose one finite-dimensional global coefficient space for the vibration. Instead, repeatedly choose points in the visible domain and generate small holomorphic perturbations associated with those points.
 
-The first Android target should budget **four ARM worker threads** for generating perturbations, with three workers as an easy lower-load setting. The GPU remains responsible for evaluating the resulting field over pixels and coloring the panel.
+The first Android prototype uses **three ARM perturbation workers plus one lightweight coordinator thread**. The existing render thread remains separate. The GPU evaluates the combined perturbation over the panel and performs the domain coloring.
 
 ## Fundamental constraint
 
@@ -14,121 +14,38 @@ A nonzero holomorphic perturbation cannot have compact support. If it vanishes o
 
 So a perturbation cannot be a true two-dimensional bump centered on a chosen pixel. It can become imperceptibly small over much of the panel, but some disturbance must escape in at least one direction.
 
-This is useful rather than merely inconvenient: the engine can choose or derive an escape direction and stop paying for regions where the effect is below the visual threshold.
+The engine therefore represents the perturbation globally and may later use perceptibility bounds only to avoid unnecessary evaluation work.
 
-## Measure the visible change in log-polar coordinates
+## Measure color displacement directly
 
-Let the current function be `f` and the changed function be `f_new`.
-
-For a small additive perturbation `delta_f`,
-
-```text
-Delta log|f| + i Delta arg(f)
-    = log(f_new / f)
-    = log(1 + delta_f / f)
-    ~= delta_f / f.
-```
-
-Thus `|delta_f / f|` is a useful first-order visibility measure away from zeros.
-
-A threshold such as
-
-```text
-tau = 0.1
-```
-
-means that changes smaller than roughly `0.1` in the combined log-modulus / argument coordinates do not need to be drawn for the first prototype.
-
-Single-precision float error is a much smaller threshold than this, so perceptibility should normally stop the calculation long before float resolution does.
-
-## Diagnostic primitive: add a constant
-
-Given a randomly selected point `a`, a requested small phase change `alpha` can be imposed exactly at that point with
-
-```text
-delta = f(a) * (exp(i alpha) - 1)
-f_new(z) = f(z) + delta.
-```
-
-This remains holomorphic. For small `alpha`,
-
-```text
-|delta| ~= |f(a)| |alpha|.
-```
-
-The visible effect away from zeros is approximately
-
-```text
-|delta / f(z)|.
-```
-
-The direction in which this effect initially grows fastest is the direction in which `|f|` decreases fastest. If
-
-```text
-q = f'(a) / f(a),
-```
-
-then a unit steepest-descent direction is
-
-```text
-v = -conj(q) / |q|.
-```
-
-The corresponding continuous escape curves satisfy
-
-```text
-dz/ds = -conj(f'(z) / f(z)),
-```
-
-and along them
-
-```text
-d/ds log|f(z)| = -|f'(z) / f(z)|^2 <= 0.
-```
-
-Near a simple zero these curves point approximately toward the zero.
-
-This primitive is valuable for tests and visualization of propagation, but it is **not** sufficient for the production vibration engine: many constant additions collapse to one net constant and therefore do not retain independent spatial identities.
-
-## Production form: multiplicative holomorphic perturbations
-
-Use
+Use a multiplicative perturbation
 
 ```text
 f_new(z) = f(z) * exp(g(z))
 ```
 
-where `g` is a small holomorphic function chosen by one perturbation worker.
-
-This has several useful properties:
-
-1. `f_new` is holomorphic whenever `f` and `g` are holomorphic.
-2. Existing zeros of `f` and their multiplicities are preserved.
-3. For a meromorphic `f`, existing poles are also preserved and no new zeros or poles are introduced by `exp(g)`.
-4. The color-coordinate displacement is especially simple:
+with holomorphic `g`. Then
 
 ```text
 Delta log|f| = Re(g)
 Delta arg(f) = Im(g)       modulo 2 pi.
 ```
 
-So `|g(z)|` directly bounds both color-coordinate changes. There is no first-order approximation in this representation; it is the exact multiplicative perturbation before argument wrapping.
+This is exact, not merely a first-order approximation. The shader therefore does not need to evaluate a complex exponential: it can add `Re(g)` directly to log modulus and `Im(g)` directly to phase before applying the existing domain coloring.
 
-To rotate the chosen point by a small angle `alpha` without changing its modulus at that point, require
+Existing zeros and their multiplicities are preserved. For meromorphic `f`, existing poles are preserved as well because `exp(g)` has neither zeros nor poles.
+
+A visual threshold such as
 
 ```text
-g(a) = i alpha.
+tau = 0.1
 ```
 
-The remaining mathematical problem is therefore precise:
+can later be used to skip regions whose total omitted `|g|` is safely below perceptibility. The mathematical function itself must remain the full holomorphic sum; the threshold is only a rendering optimization.
 
-> Given a domain, a point `a`, and a small complex value `eta`, choose a cheap canonical holomorphic `g` with `g(a) = eta` and with as little perceptible disturbance elsewhere as possible.
+## First perturbation primitive: normalized Bergman kernel on a disk
 
-## Canonical candidate on a disk: minimum-L2 perturbation
-
-On the unit disk, the Bergman kernel gives a canonical answer to the previous problem. Among square-integrable holomorphic functions with a prescribed value at `a`, the normalized kernel is the minimum-L2 choice.
-
-Define
+On the unit disk, define
 
 ```text
 phi_a(z) = (1 - |a|^2)^2 / (1 - conj(a) z)^2.
@@ -137,59 +54,149 @@ phi_a(z) = (1 - |a|^2)^2 / (1 - conj(a) z)^2.
 Then
 
 ```text
-phi_a(a) = 1
+phi_a(a) = 1.
 ```
 
-and we may take
+For a small pure phase nudge `alpha`, use
 
 ```text
-g(z) = eta * phi_a(z).
+g(z) = i alpha phi_a(z).
 ```
 
-For a pure phase nudge,
+At the selected point `a`, this changes phase by exactly `alpha` while leaving log modulus unchanged there.
+
+Its magnitude is
 
 ```text
-eta = i alpha.
+|g(z)| = |alpha| (1 - |a|^2)^2 / |1 - conj(a) z|^2.
 ```
 
-The magnitude is
+This gives a canonical minimum-L2 holomorphic perturbation with an explicit escape direction. At `a = 0`, rotational symmetry makes the minimum-L2 perturbation constant, so there is no distinguished escape direction.
+
+For an arbitrary visible rectangle, the prototype places that rectangle strictly inside a containing disk and maps the randomly selected visible point into the disk. The pole of the kernel therefore remains outside the containing disk and hence outside the visible rectangle at the instant the perturbation is generated.
+
+This containing-disk construction is a first implementation primitive, not a claim that the disk kernel is ultimately the best perturbation family for every domain.
+
+## Three perturbation workers
+
+There are exactly three long-lived perturbation worker threads.
+
+Each worker owns one active perturbation slot. When the coordinator requests a replacement, the worker:
+
+1. snapshots the current visible center, scale, and aspect ratio;
+2. draws a random point in the visible rectangle;
+3. draws a small signed phase amplitude;
+4. constructs the containing-disk Bergman descriptor;
+5. precomputes the normalized anchor and kernel scale;
+6. publishes the completed descriptor into its slot;
+7. sleeps until the coordinator asks for another perturbation.
+
+The workers do not paint pixels and do not call GLES. Their output is a compact analytic description of a holomorphic function.
+
+The first descriptor contains only float32 mathematical values:
 
 ```text
-|g(z)| = |eta| (1 - |a|^2)^2 / |1 - conj(a) z|^2.
+disk_center_re
+disk_center_im
+inverse_disk_radius
+anchor_re
+anchor_im
+kernel_scale
+phase_amplitude
 ```
 
-This makes the unavoidable escape explicit. The kernel is small over part of the disk and grows toward a boundary direction. If `a = 0`, the minimum-L2 perturbation is constant, which is exactly what rotational symmetry should force: there is no preferred escape direction from the center.
+Each worker has its own `xorshift32` random stream.
 
-For a visibility threshold `tau`, the worker can derive the perceptible region analytically from
+## Coordinator thread
+
+A fourth perturbation-system thread is deliberately lightweight. It is the coordinator rather than another mathematical worker.
+
+Roughly once per frame it:
+
+1. checks the three worker slots;
+2. computes each perturbation's scalar damping weight;
+3. retires perturbations that have decayed below the recycle threshold;
+4. asks the corresponding worker to generate a replacement;
+5. publishes a compact snapshot containing at most three active descriptors for the render thread.
+
+The coordinator does no per-pixel work and normally does no expensive complex analysis. It is primarily scheduling, lifetime management, and handoff.
+
+The prototype uses exponential damping:
 
 ```text
-|g(z)| >= tau.
+alpha(t) = alpha_0 exp(-age / decay_time).
 ```
 
-For `a != 0`, this is equivalent to
+At every fixed time, multiplying a holomorphic perturbation by this real scalar leaves it holomorphic. With three active fields,
 
 ```text
-|1 - conj(a) z|
-    <= (1 - |a|^2) sqrt(|eta| / tau).
+G(z,t) = g_1(z,t) + g_2(z,t) + g_3(z,t)
 ```
 
-The boundary is a circle whose center lies outside the unit disk; its intersection with the visible disk is the perceptible cap / escape region. This gives a cheap conservative tile bound without sampling the whole panel on the CPU.
+and the displayed function is
 
-The disk kernel is the first mathematically principled candidate, not a commitment that every visible domain must be a disk. For a rectangular or lasso-shaped domain we can later choose a different kernel, conformal map, or finite approximation.
+```text
+f_vibrating(z,t) = f_base(z) * exp(G(z,t)).
+```
+
+So simultaneous perturbations remain holomorphic by construction.
+
+Timing is stored as integer monotonic nanoseconds. Elapsed time is converted to float32 seconds for the damping calculation. The perturbation mathematics uses floats, not doubles.
+
+## GPU path
+
+The render thread copies the coordinator's published snapshot once per frame and uploads at most three descriptors as GLES uniforms.
+
+For every pixel the fragment shader:
+
+1. evaluates the existing base function's phase and log modulus;
+2. evaluates each active normalized Bergman kernel;
+3. adds the real part of `i alpha phi_a(z)` to log modulus;
+4. adds the imaginary part to phase;
+5. applies the existing Wegert-style domain coloring.
+
+Because
+
+```text
+i alpha (x + i y) = -alpha y + i alpha x,
+```
+
+the shader uses
+
+```text
+log_modulus -= alpha * kernel_imaginary
+phase       += alpha * kernel_real
+```
+
+No complex exponential is needed in the fragment shader.
+
+The first prototype deliberately evaluates all active perturbations across the full panel. Three kernels per pixel is small enough to establish correctness and measure the actual device before adding sparse tile machinery.
+
+## Current numerical parameters
+
+The initial implementation uses small values chosen for an obvious but controlled vibration:
+
+```text
+initial |alpha|:       0.055 .. 0.135 radians
+decay time:            0.70 .. 1.20 seconds
+recycle threshold:     |alpha| < 0.0045
+coordinator cadence:   about 16 ms
+active perturbations:  at most 3
+```
+
+These are tuning parameters, not mathematical commitments.
 
 ## Preserving user constraints
 
 Multiplication by `exp(g)` automatically preserves every zero constraint already satisfied by `f`.
 
-If points `c_1, ..., c_m` are required to remain at value `1`, then for small perturbations we should impose
+If points `c_1, ..., c_m` must remain at value `1`, each perturbation should additionally satisfy
 
 ```text
-g(c_k) = 0
+g(c_k) = 0.
 ```
 
-for every such point.
-
-A simple way to enforce this is to multiply the unconstrained perturbation by
+One simple construction is to multiply the unconstrained perturbation by
 
 ```text
 P_1(z) = product_k (z - c_k)
@@ -203,107 +210,47 @@ g_constrained(z)
       / (phi_a(a) * P_1(a)).
 ```
 
-This is valid when `a` is not itself one of the pinned `1` points. Higher-order derivative constraints can be represented by higher multiplicities in the vanishing factor.
+This part is **not yet wired into the Android prototype**. The current code establishes the worker/coordinator/GPU pipeline first.
 
-This construction may enlarge the perceptible region; the worker must recompute its bound rather than assuming the unconstrained kernel's bound.
+## Perceptibility and later sparse evaluation
 
-## Four-worker ARM design
-
-Use a fixed worker pool rather than creating and destroying threads.
-
-Each worker repeatedly:
-
-1. draws a random visible-domain point `a`;
-2. draws a small signed phase or log-modulus nudge `eta`;
-3. chooses the current perturbation primitive;
-4. constructs a compact descriptor for `g`;
-5. computes a conservative perceptibility bound / tile list using `tau`;
-6. pushes the descriptor into a multi-producer queue consumed by the render thread.
-
-The worker should normally **not** compute individual pixel colors. It computes the analytic perturbation and enough geometry to tell the GPU where evaluating it is worthwhile.
-
-Suggested initial descriptor fields:
+For the Bergman primitive, the region in which a single perturbation exceeds threshold `tau` can be derived analytically from
 
 ```text
-anchor_re
-anchor_im
-eta_re
-eta_im
-born_time
-lifetime
-primitive_kind
-bound_min_x
-bound_max_x
-bound_min_y
-bound_max_y
+|alpha| (1 - |a|^2)^2 / |1 - conj(a) z|^2 >= tau.
 ```
 
-The exact representation should remain float32 on the Android path unless a numerical test demonstrates a need for more precision.
+A later version can convert this into conservative screen-space tile bounds so pixels need only examine perturbations that can matter there.
 
-## Damping without breaking holomorphicity
+Culling must bound the **sum** of all omitted perturbations. It is not sufficient for every omitted perturbation to be individually below `tau` if many omitted terms could add coherently.
 
-Give each perturbation a scalar time envelope `w_j(t)`, for example a smooth exponential decay after birth.
+Sparse culling is intentionally deferred until the full-panel three-perturbation version is measured on the phone.
 
-At a given frame define
+## Current implementation status
 
-```text
-G(z, t) = sum_j w_j(t) g_j(z)
-```
+The branch now contains working code for the first architecture slice:
 
-and render
+- three long-lived native C perturbation workers;
+- one native C coordinator thread;
+- float32 perturbation descriptors;
+- integer monotonic clocks for lifetime management;
+- independent deterministic-form RNG streams seeded at startup;
+- exponential damping and automatic replacement;
+- a bounded three-descriptor snapshot handed to the render thread;
+- GLES uniform upload glue;
+- fragment-shader evaluation of the three normalized Bergman kernels;
+- continuous rendering while vibration is active;
+- a host C test for worker startup, descriptor validity, anchor bounds, and kernel normalization;
+- CI configuration to compile and run that worker test.
 
-```text
-f_vibrating(z, t) = f_base(z) * exp(G(z, t)).
-```
+Still deliberately absent:
 
-At every fixed time, `G` is holomorphic and therefore `f_vibrating` is holomorphic. As old weights decay to zero, the display returns toward the constrained base function rather than accumulating permanent random drift.
+- pinned-`1` constraint factors;
+- perceptibility tile culling;
+- measured device performance tuning;
+- a UI control for vibration strength or on/off state;
+- a policy for reseeding active kernels after very large camera moves.
 
-Independent perturbations combine by addition in `G`, which is both mathematically closed and GPU-friendly.
+The central invariant remains:
 
-## GPU pass
-
-First prototype:
-
-1. ARM workers generate descriptors asynchronously.
-2. The render thread drains a bounded batch once per frame.
-3. The GPU evaluates `f_base(z)` once per pixel.
-4. The shader sums active `g_j(z)` contributions.
-5. It evaluates `f_base(z) * exp(sum g_j(z))` and applies the existing domain coloring.
-
-Do the simple full-panel version first with a small bounded active perturbation count. This establishes correctness and measures the actual phone before adding a complicated sparse path.
-
-Second prototype:
-
-1. workers attach conservative screen-space bounds or tile lists;
-2. perturbations are binned into tiles;
-3. each pixel evaluates only perturbations assigned to its tile;
-4. a perturbation may be dropped from a tile once its maximum possible `|g_j|` there is below the visibility budget.
-
-Because skipped perturbations add, the culling rule must account for the **sum** of omitted bounds. It is not enough to say that every omitted perturbation is individually below `tau` if thousands of them could add coherently.
-
-## Initial correctness tests
-
-1. **Holomorphic closure**: compare numerical Cauchy-Riemann residuals before and after several simultaneous perturbations.
-2. **Anchor value**: verify `g(a) = eta` to float32 tolerance.
-3. **Zero preservation**: zeros of `f_base` remain zeros under multiplication by `exp(G)`.
-4. **Pinned-one preservation**: constrained perturbations keep every pinned `f = 1` point fixed to float32 tolerance.
-5. **Damping**: after all perturbation weights decay, the rendered function returns to the base function.
-6. **Visibility bound**: pixels skipped by the CPU/tile bound differ by less than the configured color-coordinate tolerance.
-7. **Determinism mode**: fixed random seeds reproduce the same perturbation stream for emulator and CI tests.
-
-## First implementation slice
-
-Keep the first code slice deliberately small:
-
-- four long-lived ARM perturbation workers;
-- deterministic per-worker RNG streams;
-- multiplicative `f * exp(G)` composition;
-- one cheap holomorphic primitive plus the constant-add diagnostic;
-- float32 descriptors;
-- fixed maximum active perturbation count;
-- simple damping;
-- no sparse tile culling until the full-panel path is measured on the phone.
-
-The important invariant is stronger than a visual approximation:
-
-> Every displayed frame should correspond to an explicitly represented holomorphic function. Perceptibility thresholds are allowed to reduce rendering work, but they must not be used to define the mathematical function itself.
+> Every displayed frame is represented as the base function times the exponential of a sum of explicitly holomorphic perturbations. Rendering optimizations may approximate what is evaluated, but they do not define the mathematical function.
