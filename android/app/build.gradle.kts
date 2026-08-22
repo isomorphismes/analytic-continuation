@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
 }
@@ -24,9 +26,17 @@ val uploadSigningConfigured = listOf(
     uploadKeyPassword,
 ).all { !it.isNullOrBlank() }
 
-// Public direct-install signing stays separate from private Google Play upload signing.
-val githubTestKeystore = file("analytic-continuation-github-test.p12")
-val githubTestKeyPassword = "analytic-continuation-test"
+// Mainline keeps a stable, public Lasso Dev sideload key. F-Droid removes the
+// encoded key before configuring Gradle, so release builds cannot depend on it.
+val sideloadKeystoreSource = file("debug/lasso-dev.p12.b64")
+val sideloadKeystoreFile = layout.buildDirectory.file("sideload-signing/lasso-dev.p12").get().asFile
+val sideloadSigningAvailable = sideloadKeystoreSource.isFile
+if (sideloadSigningAvailable && !sideloadKeystoreFile.exists()) {
+    sideloadKeystoreFile.parentFile.mkdirs()
+    sideloadKeystoreFile.writeBytes(
+        Base64.getDecoder().decode(sideloadKeystoreSource.readText().trim())
+    )
+}
 
 android {
     namespace = "org.isomorphisms.analyticcontinuation"
@@ -34,11 +44,13 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
+        // Mainline/Play/F-Droid keep the established application identity.
         applicationId = "org.isomorphisms.analyticcontinuation"
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
+        manifestPlaceholders["appLabel"] = "Analytic Continuation — Lasso"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -52,11 +64,13 @@ android {
     }
 
     signingConfigs {
-        getByName("debug") {
-            storeFile = githubTestKeystore
-            storePassword = githubTestKeyPassword
-            keyAlias = "analytic-continuation-test"
-            keyPassword = githubTestKeyPassword
+        if (sideloadSigningAvailable) {
+            create("sideloadDev") {
+                storeFile = sideloadKeystoreFile
+                storePassword = "lasso-dev"
+                keyAlias = "lasso-dev"
+                keyPassword = "lasso-dev"
+            }
         }
 
         if (uploadSigningConfigured) {
@@ -70,6 +84,17 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            // Preserve the permanent Lasso Dev sideload/update channel when its
+            // public key input is present. F-Droid does not need a debug signer.
+            applicationIdSuffix = ".lasso.dev"
+            versionNameSuffix = "-dev"
+            manifestPlaceholders["appLabel"] = "Analytic Continuation — Lasso Dev"
+            signingConfigs.findByName("sideloadDev")?.let {
+                signingConfig = it
+            }
+        }
+
         getByName("release") {
             isMinifyEnabled = false
             signingConfigs.findByName("playUpload")?.let {
