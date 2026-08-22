@@ -15,6 +15,7 @@ uniform vec2 u_zero_positions[MAX_ZEROS];
 uniform vec2 u_lasso_coefficients[LASSO_COEFFICIENT_COUNT];
 uniform float u_phase;
 uniform int u_paused;
+uniform float u_zoom;
 
 const float TAU = 6.28318530717958647692;
 const float LOG_10 = 2.30258509299404568402;
@@ -101,7 +102,7 @@ float line_mask(vec2 point, vec2 start, vec2 finish, float half_width) {
 }
 
 void main() {
-    float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y);
+    float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y) * u_zoom;
     vec2 pixel = gl_FragCoord.xy - 0.5 * u_resolution;
     vec2 z = pixel / pixel_radius;
 
@@ -191,12 +192,16 @@ void main() {
             )
         );
     } else {
-        vec2 left = pause_center + vec2(-8.0, -12.0);
-        vec2 top = pause_center + vec2(11.0, 0.0);
-        vec2 bottom = pause_center + vec2(-8.0, 12.0);
+        vec2 left_top = pause_center + vec2(-9.0, -12.0);
+        vec2 point = pause_center + vec2(11.0, 0.0);
+        vec2 left_bottom = pause_center + vec2(-9.0, 12.0);
         mark = max(
-            line_mask(gl_FragCoord.xy, left, top, 2.2),
-            line_mask(gl_FragCoord.xy, top, bottom, 2.2)
+            line_mask(gl_FragCoord.xy, left_top, point, 2.2),
+            line_mask(gl_FragCoord.xy, point, left_bottom, 2.2)
+        );
+        mark = max(
+            mark,
+            line_mask(gl_FragCoord.xy, left_bottom, left_top, 2.2)
         );
     }
 
