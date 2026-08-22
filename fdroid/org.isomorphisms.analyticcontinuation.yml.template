@@ -1,6 +1,6 @@
 Categories:
   - Science & Education
-License: CHOOSE-A-FLOSS-SPDX-ID
+License: GPL-3.0-or-later
 SourceCode: https://github.com/isomorphisms/analytic-continuation
 IssueTracker: https://github.com/isomorphisms/analytic-continuation/issues
 
@@ -14,7 +14,7 @@ Builds:
     subdir: android
     ndk: 29.0.14206865
     rm:
-      - android/app/analytic-continuation-github-test.p12
+      - android/app/debug/lasso-dev.p12.b64
     prebuild:
       - sdkmanager "platforms;android-36" "build-tools;36.0.0" "cmake;3.22.1"
     gradle:
