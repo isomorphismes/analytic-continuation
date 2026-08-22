@@ -7,13 +7,18 @@ on:
       - main
     paths:
       - '.github/workflows/lasso-dev-public-release.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'release-triggers/lasso-dev-v0.1.0.txt'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: lasso-dev-public-release
+  group: lasso-dev-public-release-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
