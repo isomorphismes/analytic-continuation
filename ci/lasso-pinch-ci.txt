@@ -1,0 +1,1 @@
+Build and emulator probe for native pinch zoom, pause/play, lasso drag, exterior coloring, and close control.
