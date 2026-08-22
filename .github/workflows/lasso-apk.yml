@@ -96,42 +96,25 @@ jobs:
             grep -Fq 'outside=domain-coloring' lasso-emulator.log
             grep -Fq 'lasso first frame:' lasso-emulator.log
 
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1)
-            width=$1
-            height=$2
-            min_side=$width
-            if [ "$height" -lt "$width" ]; then min_side=$height; fi
-            lasso_radius=$((42 * min_side / 100))
-            control_radius=$((52 * min_side / 1000))
-            if [ "$control_radius" -lt 28 ]; then control_radius=28; fi
-            if [ "$control_radius" -gt 42 ]; then control_radius=42; fi
-
-            adb shell input tap "$((control_radius + 16))" "$((control_radius + 16))"
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; control_radius=$((52 * min_side / 1000)); if [ "$control_radius" -lt 28 ]; then control_radius=28; fi; if [ "$control_radius" -gt 42 ]; then control_radius=42; fi; adb shell input tap "$((control_radius + 16))" "$((control_radius + 16))"
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'lasso phase walk paused' lasso-emulator.log
 
-            center_x=$((width / 2))
-            center_y=$((height / 2))
-            offset=$((707 * lasso_radius / 1000))
-            start_x=$((center_x + offset))
-            start_y=$((center_y - offset))
-            end_x=$((start_x + 50))
-            end_y=$((start_y - 50))
-            adb shell input swipe "$start_x" "$start_y" "$end_x" "$end_y" 500
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); center_x=$((width / 2)); center_y=$((height / 2)); offset=$((707 * lasso_radius / 1000)); start_x=$((center_x + offset)); start_y=$((center_y - offset)); end_x=$((start_x + 50)); end_y=$((start_y - 50)); adb shell input swipe "$start_x" "$start_y" "$end_x" "$end_y" 500
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'lasso deformed:' lasso-emulator.log
             grep -Fq 'lasso drag finished:' lasso-emulator.log
 
-            adb shell input tap "$center_x" "$center_y"
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; adb shell input tap "$((width / 2))" "$((height / 2))"
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'zero added:' lasso-emulator.log
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable' lasso-emulator.log
             adb exec-out screencap -p > lasso-emulator.png
 
-            adb shell input tap "$((width - 4 * control_radius - 16))" "$((control_radius + 16))"
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; control_radius=$((52 * min_side / 1000)); if [ "$control_radius" -lt 28 ]; then control_radius=28; fi; if [ "$control_radius" -gt 42 ]; then control_radius=42; fi; adb shell input tap "$((width - 4 * control_radius - 16))" "$((control_radius + 16))"
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'lasso close requested' lasso-emulator.log
