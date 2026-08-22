@@ -55,6 +55,7 @@ struct engine {
     GLint lasso_coefficients_location;
     GLint phase_location;
     GLint paused_location;
+    GLint zoom_location;
 
     float zero_positions[MAX_ZEROS][2];
     float zero_preimages[MAX_ZEROS][2];
@@ -71,6 +72,12 @@ struct engine {
     uint32_t random_state;
     double last_animation_time;
     bool paused;
+
+    float zoom;
+    float pinch_start_distance;
+    float pinch_start_zoom;
+    bool pinching;
+    bool suppress_tap;
 
     int candidate_zero;
     bool dragging_zero;
@@ -327,6 +334,12 @@ static void initialize_lasso(struct engine *engine) {
     engine->last_animation_time = monotonic_seconds();
     engine->paused = false;
 
+    engine->zoom = 1.0f;
+    engine->pinch_start_distance = 0.0f;
+    engine->pinch_start_zoom = 1.0f;
+    engine->pinching = false;
+    engine->suppress_tap = false;
+
     engine->candidate_zero = -1;
     engine->dragging_zero = false;
     engine->lasso_candidate = false;
@@ -465,6 +478,7 @@ static bool create_renderer(struct engine *engine) {
     );
     engine->phase_location = glGetUniformLocation(engine->program, "u_phase");
     engine->paused_location = glGetUniformLocation(engine->program, "u_paused");
+    engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
 
     if (
         engine->resolution_location < 0 ||
@@ -473,7 +487,8 @@ static bool create_renderer(struct engine *engine) {
         engine->zero_positions_location < 0 ||
         engine->lasso_coefficients_location < 0 ||
         engine->phase_location < 0 ||
-        engine->paused_location < 0
+        engine->paused_location < 0 ||
+        engine->zoom_location < 0
     ) {
         LOGE("lasso shader uniforms unavailable");
         return false;
@@ -646,6 +661,10 @@ static float lasso_pixel_radius(const struct engine *engine) {
     return 0.42f * fminf((float)engine->width, (float)engine->height);
 }
 
+static float view_pixel_radius(const struct engine *engine) {
+    return lasso_pixel_radius(engine) * engine->zoom;
+}
+
 static void draw_frame(struct engine *engine) {
     if (
         engine->display == EGL_NO_DISPLAY ||
@@ -680,6 +699,7 @@ static void draw_frame(struct engine *engine) {
     );
     glUniform1f(engine->phase_location, engine->phase);
     glUniform1i(engine->paused_location, engine->paused ? 1 : 0);
+    glUniform1f(engine->zoom_location, engine->zoom);
 
     glBindVertexArray(engine->vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -698,7 +718,7 @@ static void draw_frame(struct engine *engine) {
             center_pixel
         );
 
-        int outside_y = engine->height / 2 + (int)(1.25f * lasso_pixel_radius(engine));
+        int outside_y = engine->height / 2 + (int)(1.25f * view_pixel_radius(engine));
         if (outside_y >= engine->height) outside_y = engine->height - 1;
         glReadPixels(
             engine->width / 2,
@@ -736,7 +756,7 @@ static void screen_to_plane(
     float y,
     float output[2]
 ) {
-    float scale = lasso_pixel_radius(engine);
+    float scale = view_pixel_radius(engine);
     output[0] = (x - 0.5f * (float)engine->width) / scale;
     output[1] = (0.5f * (float)engine->height - y) / scale;
 }
@@ -769,7 +789,7 @@ static int nearest_zero(const struct engine *engine, float x, float y) {
 
     float point[2];
     screen_to_plane(engine, x, y, point);
-    float scale = lasso_pixel_radius(engine);
+    float scale = view_pixel_radius(engine);
     float best_distance = 38.0f;
     int best_index = -1;
 
@@ -797,7 +817,7 @@ static bool nearest_lasso_parameter(
 
     float point[2];
     screen_to_plane(engine, x, y, point);
-    float scale = lasso_pixel_radius(engine);
+    float scale = view_pixel_radius(engine);
     float best_distance = 44.0f;
     bool found = false;
 
@@ -1035,6 +1055,47 @@ static void clear_gesture(struct engine *engine) {
     engine->moved = false;
 }
 
+static float pinch_distance(AInputEvent *event) {
+    if (AMotionEvent_getPointerCount(event) < 2) {
+        return 0.0f;
+    }
+    float dx = AMotionEvent_getX(event, 1) - AMotionEvent_getX(event, 0);
+    float dy = AMotionEvent_getY(event, 1) - AMotionEvent_getY(event, 0);
+    return hypotf(dx, dy);
+}
+
+static void begin_pinch(struct engine *engine, AInputEvent *event) {
+    float distance = pinch_distance(event);
+    if (distance < 8.0f) {
+        return;
+    }
+    engine->pinching = true;
+    engine->suppress_tap = true;
+    engine->pinch_start_distance = distance;
+    engine->pinch_start_zoom = engine->zoom;
+    clear_gesture(engine);
+}
+
+static void update_pinch(struct engine *engine, AInputEvent *event) {
+    if (!engine->pinching || engine->pinch_start_distance < 8.0f) {
+        return;
+    }
+
+    float distance = pinch_distance(event);
+    if (distance < 8.0f) {
+        return;
+    }
+
+    float zoom = engine->pinch_start_zoom * distance / engine->pinch_start_distance;
+    if (zoom < 0.5f) zoom = 0.5f;
+    if (zoom > 4.0f) zoom = 4.0f;
+
+    if (fabsf(zoom - engine->zoom) > 1.0e-4f) {
+        engine->zoom = zoom;
+        engine->dirty = true;
+    }
+}
+
 static int32_t handle_input(struct android_app *app, AInputEvent *event) {
     struct engine *engine = app->userData;
     if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION) {
@@ -1049,6 +1110,7 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
         case AMOTION_EVENT_ACTION_DOWN: {
             float x = AMotionEvent_getX(event, 0);
             float y = AMotionEvent_getY(event, 0);
+            engine->suppress_tap = false;
 
             if (pause_control_contains(engine, x, y)) {
                 toggle_pause(engine);
@@ -1087,11 +1149,16 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
         }
 
         case AMOTION_EVENT_ACTION_POINTER_DOWN:
-            clear_gesture(engine);
-            engine->moved = true;
+            if (pointer_count >= 2) {
+                begin_pinch(engine, event);
+            }
             return 1;
 
         case AMOTION_EVENT_ACTION_MOVE: {
+            if (pointer_count >= 2) {
+                update_pinch(engine, event);
+                return 1;
+            }
             if (pointer_count != 1) {
                 return 1;
             }
@@ -1114,6 +1181,13 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
         }
 
         case AMOTION_EVENT_ACTION_UP: {
+            if (engine->suppress_tap || engine->pinching) {
+                engine->pinching = false;
+                engine->suppress_tap = false;
+                clear_gesture(engine);
+                return 1;
+            }
+
             float x = AMotionEvent_getX(event, 0);
             float y = AMotionEvent_getY(event, 0);
 
@@ -1137,8 +1211,18 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
             return 1;
         }
 
-        case AMOTION_EVENT_ACTION_CANCEL:
         case AMOTION_EVENT_ACTION_POINTER_UP:
+            if (engine->pinching) {
+                LOGI("lasso zoom: %.3f", engine->zoom);
+            }
+            engine->pinching = false;
+            engine->suppress_tap = true;
+            clear_gesture(engine);
+            return 1;
+
+        case AMOTION_EVENT_ACTION_CANCEL:
+            engine->pinching = false;
+            engine->suppress_tap = false;
             clear_gesture(engine);
             return 1;
 
