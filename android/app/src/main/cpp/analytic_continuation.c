@@ -18,12 +18,12 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-#define MAX_ZEROS 32
+#define MAX_FACTORS 32
 #define LASSO_COEFFICIENT_COUNT 5
 #define LASSO_SAMPLE_COUNT 120
 
 static const float TAU = 6.28318530717958647692f;
-static const float ZERO_PREIMAGE_LIMIT = 0.94f;
+static const float FACTOR_PREIMAGE_LIMIT = 0.94f;
 static const float LASSO_DERIVATIVE_BUDGET = 0.88f;
 
 static const char *VERTEX_SHADER =
@@ -35,6 +35,17 @@ static const char *VERTEX_SHADER =
     "    v_ndc = a_position;\n"
     "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
     "}\n";
+
+enum placement_kind {
+    PLACEMENT_ZERO = 0,
+    PLACEMENT_INFINITY = 1
+};
+
+enum factor_kind {
+    FACTOR_NONE = -1,
+    FACTOR_ZERO = 0,
+    FACTOR_INFINITY = 1
+};
 
 struct engine {
     struct android_app *app;
@@ -50,16 +61,24 @@ struct engine {
     GLuint vbo;
     GLint resolution_location;
     GLint zero_count_location;
+    GLint pole_count_location;
     GLint zero_preimages_location;
+    GLint pole_preimages_location;
     GLint zero_positions_location;
+    GLint pole_positions_location;
     GLint lasso_coefficients_location;
     GLint phase_location;
     GLint paused_location;
     GLint zoom_location;
+    GLint placement_kind_location;
 
-    float zero_positions[MAX_ZEROS][2];
-    float zero_preimages[MAX_ZEROS][2];
+    float zero_positions[MAX_FACTORS][2];
+    float zero_preimages[MAX_FACTORS][2];
     int zero_count;
+    float pole_positions[MAX_FACTORS][2];
+    float pole_preimages[MAX_FACTORS][2];
+    int pole_count;
+    enum placement_kind placement_kind;
 
     float lasso_coefficients[LASSO_COEFFICIENT_COUNT][2];
     float lasso_start_coefficients[LASSO_COEFFICIENT_COUNT][2];
@@ -79,8 +98,9 @@ struct engine {
     bool pinching;
     bool suppress_tap;
 
-    int candidate_zero;
-    bool dragging_zero;
+    enum factor_kind candidate_kind;
+    int candidate_index;
+    bool dragging_factor;
     bool moved;
     float down_x;
     float down_y;
@@ -145,7 +165,6 @@ static void lasso_map_with_coefficients(
     derivative[1] = 0.0f;
 
     float power[2] = {w_x, w_y};
-
     for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
         int degree = index + 2;
         float next_power[2];
@@ -153,22 +172,16 @@ static void lasso_map_with_coefficients(
 
         float mapped_term[2];
         complex_multiply(
-            coefficients[index][0],
-            coefficients[index][1],
-            next_power[0],
-            next_power[1],
-            mapped_term
+            coefficients[index][0], coefficients[index][1],
+            next_power[0], next_power[1], mapped_term
         );
         output[0] += amount * mapped_term[0];
         output[1] += amount * mapped_term[1];
 
         float derivative_term[2];
         complex_multiply(
-            coefficients[index][0],
-            coefficients[index][1],
-            power[0],
-            power[1],
-            derivative_term
+            coefficients[index][0], coefficients[index][1],
+            power[0], power[1], derivative_term
         );
         derivative[0] += amount * (float)degree * derivative_term[0];
         derivative[1] += amount * (float)degree * derivative_term[1];
@@ -186,12 +199,7 @@ static void lasso_map(
 ) {
     float derivative[2];
     lasso_map_with_coefficients(
-        engine->lasso_coefficients,
-        w_x,
-        w_y,
-        1.0f,
-        output,
-        derivative
+        engine->lasso_coefficients, w_x, w_y, 1.0f, output, derivative
     );
 }
 
@@ -206,26 +214,17 @@ static bool inverse_lasso_with_coefficients(
 
     for (int stage = 1; stage <= 4; ++stage) {
         float amount = 0.25f * (float)stage;
-
         for (int iteration = 0; iteration < 4; ++iteration) {
             float mapped[2];
             float derivative[2];
             lasso_map_with_coefficients(
-                coefficients,
-                w_x,
-                w_y,
-                amount,
-                mapped,
-                derivative
+                coefficients, w_x, w_y, amount, mapped, derivative
             );
 
             float correction[2];
             if (!complex_divide(
-                    mapped[0] - z_x,
-                    mapped[1] - z_y,
-                    derivative[0],
-                    derivative[1],
-                    correction
+                    mapped[0] - z_x, mapped[1] - z_y,
+                    derivative[0], derivative[1], correction
                 )) {
                 return false;
             }
@@ -236,7 +235,6 @@ static bool inverse_lasso_with_coefficients(
                 correction[0] *= scale;
                 correction[1] *= scale;
             }
-
             w_x -= correction[0];
             w_y -= correction[1];
         }
@@ -246,7 +244,6 @@ static bool inverse_lasso_with_coefficients(
     float derivative[2];
     lasso_map_with_coefficients(coefficients, w_x, w_y, 1.0f, mapped, derivative);
     float residual = hypotf(mapped[0] - z_x, mapped[1] - z_y);
-
     output[0] = w_x;
     output[1] = w_y;
     return residual < 2.0e-3f;
@@ -259,10 +256,7 @@ static bool inverse_lasso(
     float output[2]
 ) {
     return inverse_lasso_with_coefficients(
-        engine->lasso_coefficients,
-        z_x,
-        z_y,
-        output
+        engine->lasso_coefficients, z_x, z_y, output
     );
 }
 
@@ -271,28 +265,27 @@ static float lasso_derivative_budget(
 ) {
     float budget = 0.0f;
     for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
-        float degree = (float)(index + 2);
-        budget += degree * hypotf(coefficients[index][0], coefficients[index][1]);
+        budget += (float)(index + 2) * hypotf(
+            coefficients[index][0], coefficients[index][1]
+        );
     }
     return budget;
 }
 
-static bool compute_zero_preimages(
-    const struct engine *engine,
+static bool compute_preimages(
+    const float positions[MAX_FACTORS][2],
+    int count,
     const float coefficients[LASSO_COEFFICIENT_COUNT][2],
-    float output[MAX_ZEROS][2]
+    float output[MAX_FACTORS][2]
 ) {
-    for (int index = 0; index < engine->zero_count; ++index) {
+    for (int index = 0; index < count; ++index) {
         float preimage[2];
         if (!inverse_lasso_with_coefficients(
-                coefficients,
-                engine->zero_positions[index][0],
-                engine->zero_positions[index][1],
-                preimage
+                coefficients, positions[index][0], positions[index][1], preimage
             )) {
             return false;
         }
-        if (hypotf(preimage[0], preimage[1]) >= ZERO_PREIMAGE_LIMIT) {
+        if (hypotf(preimage[0], preimage[1]) >= FACTOR_PREIMAGE_LIMIT) {
             return false;
         }
         output[index][0] = preimage[0];
@@ -304,29 +297,29 @@ static bool compute_zero_preimages(
 static bool coefficients_are_valid(
     const struct engine *engine,
     const float coefficients[LASSO_COEFFICIENT_COUNT][2],
-    float output_preimages[MAX_ZEROS][2]
+    float zero_preimages[MAX_FACTORS][2],
+    float pole_preimages[MAX_FACTORS][2]
 ) {
     if (lasso_derivative_budget(coefficients) > LASSO_DERIVATIVE_BUDGET) {
         return false;
     }
-    return compute_zero_preimages(engine, coefficients, output_preimages);
+    return compute_preimages(
+        engine->zero_positions, engine->zero_count, coefficients, zero_preimages
+    ) && compute_preimages(
+        engine->pole_positions, engine->pole_count, coefficients, pole_preimages
+    );
 }
 
 static void initialize_lasso(struct engine *engine) {
     memset(engine->lasso_coefficients, 0, sizeof(engine->lasso_coefficients));
 
-    engine->zero_count = 3;
-    engine->zero_positions[0][0] = -0.46f;
-    engine->zero_positions[0][1] = 0.16f;
-    engine->zero_positions[1][0] = 0.28f;
-    engine->zero_positions[1][1] = 0.37f;
-    engine->zero_positions[2][0] = 0.14f;
-    engine->zero_positions[2][1] = -0.43f;
-
-    for (int index = 0; index < engine->zero_count; ++index) {
-        engine->zero_preimages[index][0] = engine->zero_positions[index][0];
-        engine->zero_preimages[index][1] = engine->zero_positions[index][1];
-    }
+    engine->zero_count = 1;
+    engine->zero_positions[0][0] = 0.0f;
+    engine->zero_positions[0][1] = 0.0f;
+    engine->zero_preimages[0][0] = 0.0f;
+    engine->zero_preimages[0][1] = 0.0f;
+    engine->pole_count = 0;
+    engine->placement_kind = PLACEMENT_ZERO;
 
     engine->phase = 0.0f;
     engine->phase_velocity = 0.48f;
@@ -340,8 +333,9 @@ static void initialize_lasso(struct engine *engine) {
     engine->pinching = false;
     engine->suppress_tap = false;
 
-    engine->candidate_zero = -1;
-    engine->dragging_zero = false;
+    engine->candidate_kind = FACTOR_NONE;
+    engine->candidate_index = -1;
+    engine->dragging_factor = false;
     engine->lasso_candidate = false;
     engine->dragging_lasso = false;
     engine->moved = false;
@@ -373,7 +367,6 @@ static char *load_asset_text(AAssetManager *manager, const char *name) {
         }
         offset += amount;
     }
-
     text[length] = '\0';
     AAsset_close(asset);
     return text;
@@ -438,8 +431,7 @@ static bool create_renderer(struct engine *engine) {
     };
 
     char *fragment_source = load_asset_text(
-        engine->app->activity->assetManager,
-        "continuation.frag"
+        engine->app->activity->assetManager, "continuation.frag"
     );
     if (fragment_source == NULL) {
         return false;
@@ -448,7 +440,6 @@ static bool create_renderer(struct engine *engine) {
     GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, VERTEX_SHADER);
     GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
     free(fragment_source);
-
     if (vertex_shader == 0 || fragment_shader == 0) {
         if (vertex_shader != 0) glDeleteShader(vertex_shader);
         if (fragment_shader != 0) glDeleteShader(fragment_shader);
@@ -464,31 +455,24 @@ static bool create_renderer(struct engine *engine) {
 
     engine->resolution_location = glGetUniformLocation(engine->program, "u_resolution");
     engine->zero_count_location = glGetUniformLocation(engine->program, "u_zero_count");
-    engine->zero_preimages_location = glGetUniformLocation(
-        engine->program,
-        "u_zero_preimages[0]"
-    );
-    engine->zero_positions_location = glGetUniformLocation(
-        engine->program,
-        "u_zero_positions[0]"
-    );
-    engine->lasso_coefficients_location = glGetUniformLocation(
-        engine->program,
-        "u_lasso_coefficients[0]"
-    );
+    engine->pole_count_location = glGetUniformLocation(engine->program, "u_pole_count");
+    engine->zero_preimages_location = glGetUniformLocation(engine->program, "u_zero_preimages[0]");
+    engine->pole_preimages_location = glGetUniformLocation(engine->program, "u_pole_preimages[0]");
+    engine->zero_positions_location = glGetUniformLocation(engine->program, "u_zero_positions[0]");
+    engine->pole_positions_location = glGetUniformLocation(engine->program, "u_pole_positions[0]");
+    engine->lasso_coefficients_location = glGetUniformLocation(engine->program, "u_lasso_coefficients[0]");
     engine->phase_location = glGetUniformLocation(engine->program, "u_phase");
     engine->paused_location = glGetUniformLocation(engine->program, "u_paused");
     engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
+    engine->placement_kind_location = glGetUniformLocation(engine->program, "u_placement_kind");
 
     if (
-        engine->resolution_location < 0 ||
-        engine->zero_count_location < 0 ||
-        engine->zero_preimages_location < 0 ||
-        engine->zero_positions_location < 0 ||
-        engine->lasso_coefficients_location < 0 ||
-        engine->phase_location < 0 ||
-        engine->paused_location < 0 ||
-        engine->zoom_location < 0
+        engine->resolution_location < 0 || engine->zero_count_location < 0 ||
+        engine->pole_count_location < 0 || engine->zero_preimages_location < 0 ||
+        engine->pole_preimages_location < 0 || engine->zero_positions_location < 0 ||
+        engine->pole_positions_location < 0 || engine->lasso_coefficients_location < 0 ||
+        engine->phase_location < 0 || engine->paused_location < 0 ||
+        engine->zoom_location < 0 || engine->placement_kind_location < 0
     ) {
         LOGE("lasso shader uniforms unavailable");
         return false;
@@ -496,23 +480,10 @@ static bool create_renderer(struct engine *engine) {
 
     glGenVertexArrays(1, &engine->vao);
     glBindVertexArray(engine->vao);
-
     glGenBuffers(1, &engine->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, engine->vbo);
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        sizeof(fullscreen_triangle),
-        fullscreen_triangle,
-        GL_STATIC_DRAW
-    );
-    glVertexAttribPointer(
-        0,
-        2,
-        GL_FLOAT,
-        GL_FALSE,
-        2 * (GLsizei)sizeof(GLfloat),
-        (const void *)0
-    );
+    glBufferData(GL_ARRAY_BUFFER, sizeof(fullscreen_triangle), fullscreen_triangle, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * (GLsizei)sizeof(GLfloat), (const void *)0);
     glEnableVertexAttribArray(0);
 
     glDisable(GL_DEPTH_TEST);
@@ -522,8 +493,7 @@ static bool create_renderer(struct engine *engine) {
 
     LOGI(
         "lasso renderer ready: GL_VERSION=%s GL_RENDERER=%s",
-        glGetString(GL_VERSION),
-        glGetString(GL_RENDERER)
+        glGetString(GL_VERSION), glGetString(GL_RENDERER)
     );
     return true;
 }
@@ -555,10 +525,7 @@ static bool initialize_display(struct engine *engine) {
 
     EGLConfig config = NULL;
     EGLint config_count = 0;
-    if (
-        !eglChooseConfig(display, config_attributes, &config, 1, &config_count) ||
-        config_count != 1
-    ) {
+    if (!eglChooseConfig(display, config_attributes, &config, 1, &config_count) || config_count != 1) {
         LOGE("could not choose GLES3 EGL config: 0x%x", eglGetError());
         eglTerminate(display);
         return false;
@@ -607,10 +574,8 @@ static bool initialize_display(struct engine *engine) {
     engine->last_animation_time = monotonic_seconds();
     engine->dirty = true;
     LOGI(
-        "lasso ready: surface=%dx%d zeros=%d outside=domain-coloring",
-        engine->width,
-        engine->height,
-        engine->zero_count
+        "lasso ready: surface=%dx%d zeros=%d poles=%d placement=zero outside=domain-coloring",
+        engine->width, engine->height, engine->zero_count, engine->pole_count
     );
     return true;
 }
@@ -634,14 +599,9 @@ static void terminate_display(struct engine *engine) {
     }
 
     eglMakeCurrent(engine->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    if (engine->context != EGL_NO_CONTEXT) {
-        eglDestroyContext(engine->display, engine->context);
-    }
-    if (engine->surface != EGL_NO_SURFACE) {
-        eglDestroySurface(engine->display, engine->surface);
-    }
+    if (engine->context != EGL_NO_CONTEXT) eglDestroyContext(engine->display, engine->context);
+    if (engine->surface != EGL_NO_SURFACE) eglDestroySurface(engine->display, engine->surface);
     eglTerminate(engine->display);
-
     engine->display = EGL_NO_DISPLAY;
     engine->surface = EGL_NO_SURFACE;
     engine->context = EGL_NO_CONTEXT;
@@ -667,31 +627,20 @@ static float view_pixel_radius(const struct engine *engine) {
 
 static void draw_frame(struct engine *engine) {
     if (
-        engine->display == EGL_NO_DISPLAY ||
-        engine->program == 0 ||
-        engine->width <= 0 ||
-        engine->height <= 0
+        engine->display == EGL_NO_DISPLAY || engine->program == 0 ||
+        engine->width <= 0 || engine->height <= 0
     ) {
         return;
     }
 
     glUseProgram(engine->program);
-    glUniform2f(
-        engine->resolution_location,
-        (float)engine->width,
-        (float)engine->height
-    );
+    glUniform2f(engine->resolution_location, (float)engine->width, (float)engine->height);
     glUniform1i(engine->zero_count_location, engine->zero_count);
-    glUniform2fv(
-        engine->zero_preimages_location,
-        MAX_ZEROS,
-        &engine->zero_preimages[0][0]
-    );
-    glUniform2fv(
-        engine->zero_positions_location,
-        MAX_ZEROS,
-        &engine->zero_positions[0][0]
-    );
+    glUniform1i(engine->pole_count_location, engine->pole_count);
+    glUniform2fv(engine->zero_preimages_location, MAX_FACTORS, &engine->zero_preimages[0][0]);
+    glUniform2fv(engine->pole_preimages_location, MAX_FACTORS, &engine->pole_preimages[0][0]);
+    glUniform2fv(engine->zero_positions_location, MAX_FACTORS, &engine->zero_positions[0][0]);
+    glUniform2fv(engine->pole_positions_location, MAX_FACTORS, &engine->pole_positions[0][0]);
     glUniform2fv(
         engine->lasso_coefficients_location,
         LASSO_COEFFICIENT_COUNT,
@@ -700,6 +649,7 @@ static void draw_frame(struct engine *engine) {
     glUniform1f(engine->phase_location, engine->phase);
     glUniform1i(engine->paused_location, engine->paused ? 1 : 0);
     glUniform1f(engine->zoom_location, engine->zoom);
+    glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
 
     glBindVertexArray(engine->vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -707,39 +657,20 @@ static void draw_frame(struct engine *engine) {
     if (!engine->logged_first_frame) {
         GLubyte center_pixel[4] = {0, 0, 0, 0};
         GLubyte outside_pixel[4] = {0, 0, 0, 0};
-
         glReadPixels(
-            engine->width / 2,
-            engine->height / 2,
-            1,
-            1,
-            GL_RGBA,
-            GL_UNSIGNED_BYTE,
-            center_pixel
+            engine->width / 2, engine->height / 2, 1, 1,
+            GL_RGBA, GL_UNSIGNED_BYTE, center_pixel
         );
-
         int outside_y = engine->height / 2 + (int)(1.25f * view_pixel_radius(engine));
         if (outside_y >= engine->height) outside_y = engine->height - 1;
         glReadPixels(
-            engine->width / 2,
-            outside_y,
-            1,
-            1,
-            GL_RGBA,
-            GL_UNSIGNED_BYTE,
-            outside_pixel
+            engine->width / 2, outside_y, 1, 1,
+            GL_RGBA, GL_UNSIGNED_BYTE, outside_pixel
         );
-
         LOGI(
             "lasso first frame: center rgba=%u,%u,%u,%u outside rgba=%u,%u,%u,%u",
-            center_pixel[0],
-            center_pixel[1],
-            center_pixel[2],
-            center_pixel[3],
-            outside_pixel[0],
-            outside_pixel[1],
-            outside_pixel[2],
-            outside_pixel[3]
+            center_pixel[0], center_pixel[1], center_pixel[2], center_pixel[3],
+            outside_pixel[0], outside_pixel[1], outside_pixel[2], outside_pixel[3]
         );
         engine->logged_first_frame = true;
     }
@@ -768,41 +699,80 @@ static float control_radius(const struct engine *engine) {
     return radius;
 }
 
+static float placement_radius(const struct engine *engine) {
+    float radius = 0.048f * fminf((float)engine->width, (float)engine->height);
+    if (radius < 26.0f) radius = 26.0f;
+    if (radius > 38.0f) radius = 38.0f;
+    return radius;
+}
+
 static bool pause_control_contains(const struct engine *engine, float x, float y) {
     float radius = control_radius(engine);
-    float center_x = radius + 16.0f;
-    float center_y = radius + 16.0f;
-    return hypotf(x - center_x, y - center_y) <= radius;
+    return hypotf(x - radius - 16.0f, y - radius - 16.0f) <= radius;
 }
 
-static bool close_control_contains(const struct engine *engine, float x, float y) {
-    float radius = control_radius(engine);
-    float center_x = (float)engine->width - 4.0f * radius - 16.0f;
-    float center_y = radius + 16.0f;
-    return hypotf(x - center_x, y - center_y) <= radius;
+static bool placement_control_hit(
+    const struct engine *engine,
+    float x,
+    float y,
+    enum placement_kind *kind
+) {
+    float radius = placement_radius(engine);
+    float zero_x = radius + 16.0f;
+    float infinity_x = zero_x + 2.0f * radius + 14.0f;
+    float center_y = (float)engine->height - radius - 16.0f;
+
+    if (hypotf(x - zero_x, y - center_y) <= radius) {
+        *kind = PLACEMENT_ZERO;
+        return true;
+    }
+    if (hypotf(x - infinity_x, y - center_y) <= radius) {
+        *kind = PLACEMENT_INFINITY;
+        return true;
+    }
+    return false;
 }
 
-static int nearest_zero(const struct engine *engine, float x, float y) {
-    if (engine->zero_count == 0 || engine->width <= 0 || engine->height <= 0) {
-        return -1;
+static void nearest_factor(
+    const struct engine *engine,
+    float x,
+    float y,
+    enum factor_kind *kind,
+    int *factor_index
+) {
+    *kind = FACTOR_NONE;
+    *factor_index = -1;
+    if (engine->width <= 0 || engine->height <= 0) {
+        return;
     }
 
     float point[2];
     screen_to_plane(engine, x, y, point);
     float scale = view_pixel_radius(engine);
     float best_distance = 38.0f;
-    int best_index = -1;
 
     for (int index = 0; index < engine->zero_count; ++index) {
-        float dx = (point[0] - engine->zero_positions[index][0]) * scale;
-        float dy = (point[1] - engine->zero_positions[index][1]) * scale;
-        float distance = hypotf(dx, dy);
+        float distance = hypotf(
+            (point[0] - engine->zero_positions[index][0]) * scale,
+            (point[1] - engine->zero_positions[index][1]) * scale
+        );
         if (distance < best_distance) {
             best_distance = distance;
-            best_index = index;
+            *kind = FACTOR_ZERO;
+            *factor_index = index;
         }
     }
-    return best_index;
+    for (int index = 0; index < engine->pole_count; ++index) {
+        float distance = hypotf(
+            (point[0] - engine->pole_positions[index][0]) * scale,
+            (point[1] - engine->pole_positions[index][1]) * scale
+        );
+        if (distance < best_distance) {
+            best_distance = distance;
+            *kind = FACTOR_INFINITY;
+            *factor_index = index;
+        }
+    }
 }
 
 static bool nearest_lasso_parameter(
@@ -827,7 +797,6 @@ static bool nearest_lasso_parameter(
         float w_y = sinf(angle);
         float mapped[2];
         lasso_map(engine, w_x, w_y, mapped);
-
         float distance = hypotf(
             (point[0] - mapped[0]) * scale,
             (point[1] - mapped[1]) * scale
@@ -839,70 +808,83 @@ static bool nearest_lasso_parameter(
             found = true;
         }
     }
-
     return found;
 }
 
-static void move_zero(struct engine *engine, int index, float x, float y) {
-    if (index < 0 || index >= engine->zero_count) {
+static void move_factor(
+    struct engine *engine,
+    enum factor_kind kind,
+    int index,
+    float x,
+    float y
+) {
+    float (*positions)[2] = kind == FACTOR_ZERO ? engine->zero_positions : engine->pole_positions;
+    float (*preimages)[2] = kind == FACTOR_ZERO ? engine->zero_preimages : engine->pole_preimages;
+    int count = kind == FACTOR_ZERO ? engine->zero_count : engine->pole_count;
+    if (kind == FACTOR_NONE || index < 0 || index >= count) {
         return;
     }
 
     float point[2];
     screen_to_plane(engine, x, y, point);
-
     float preimage[2];
     if (!inverse_lasso(engine, point[0], point[1], preimage)) {
         return;
     }
 
     float radius = hypotf(preimage[0], preimage[1]);
-    if (radius >= ZERO_PREIMAGE_LIMIT && radius > 0.0f) {
-        float scale = ZERO_PREIMAGE_LIMIT / radius;
+    if (radius >= FACTOR_PREIMAGE_LIMIT && radius > 0.0f) {
+        float scale = FACTOR_PREIMAGE_LIMIT / radius;
         preimage[0] *= scale;
         preimage[1] *= scale;
         lasso_map(engine, preimage[0], preimage[1], point);
     }
 
-    engine->zero_positions[index][0] = point[0];
-    engine->zero_positions[index][1] = point[1];
-    engine->zero_preimages[index][0] = preimage[0];
-    engine->zero_preimages[index][1] = preimage[1];
+    positions[index][0] = point[0];
+    positions[index][1] = point[1];
+    preimages[index][0] = preimage[0];
+    preimages[index][1] = preimage[1];
     engine->dirty = true;
 }
 
-static void add_zero(struct engine *engine, float x, float y) {
-    if (engine->zero_count >= MAX_ZEROS) {
-        LOGI("zero ignored: limit=%d", MAX_ZEROS);
+static void add_factor(
+    struct engine *engine,
+    enum placement_kind placement,
+    float x,
+    float y
+) {
+    int *count = placement == PLACEMENT_ZERO ? &engine->zero_count : &engine->pole_count;
+    float (*positions)[2] = placement == PLACEMENT_ZERO ? engine->zero_positions : engine->pole_positions;
+    float (*preimages)[2] = placement == PLACEMENT_ZERO ? engine->zero_preimages : engine->pole_preimages;
+    const char *name = placement == PLACEMENT_ZERO ? "zero" : "infinity";
+
+    if (*count >= MAX_FACTORS) {
+        LOGI("%s ignored: limit=%d", name, MAX_FACTORS);
         return;
     }
 
     float point[2];
     screen_to_plane(engine, x, y, point);
-
     float preimage[2];
     if (!inverse_lasso(engine, point[0], point[1], preimage)) {
         return;
     }
-    if (hypotf(preimage[0], preimage[1]) >= ZERO_PREIMAGE_LIMIT) {
+    if (hypotf(preimage[0], preimage[1]) >= FACTOR_PREIMAGE_LIMIT) {
+        LOGI("%s ignored: tap outside lasso", name);
         return;
     }
 
-    int index = engine->zero_count;
-    engine->zero_positions[index][0] = point[0];
-    engine->zero_positions[index][1] = point[1];
-    engine->zero_preimages[index][0] = preimage[0];
-    engine->zero_preimages[index][1] = preimage[1];
-    engine->zero_count += 1;
+    int index = *count;
+    positions[index][0] = point[0];
+    positions[index][1] = point[1];
+    preimages[index][0] = preimage[0];
+    preimages[index][1] = preimage[1];
+    *count += 1;
     engine->dirty = true;
 
     LOGI(
-        "zero added: z=%.6g%+.6gi preimage=%.6g%+.6gi count=%d",
-        point[0],
-        point[1],
-        preimage[0],
-        preimage[1],
-        engine->zero_count
+        "%s added: z=%.6g%+.6gi preimage=%.6g%+.6gi count=%d",
+        name, point[0], point[1], preimage[0], preimage[1], *count
     );
 }
 
@@ -922,96 +904,73 @@ static void deform_lasso(struct engine *engine, float x, float y) {
     float derivative[2];
     lasso_map_with_coefficients(
         engine->lasso_start_coefficients,
-        engine->lasso_parameter[0],
-        engine->lasso_parameter[1],
-        1.0f,
-        start_point,
-        derivative
+        engine->lasso_parameter[0], engine->lasso_parameter[1],
+        1.0f, start_point, derivative
     );
 
     float delta_x = target[0] - start_point[0];
     float delta_y = target[1] - start_point[1];
-
     float coefficient_delta[LASSO_COEFFICIENT_COUNT][2];
-    float power[2] = {
-        engine->lasso_parameter[0],
-        engine->lasso_parameter[1]
-    };
+    float power[2] = {engine->lasso_parameter[0], engine->lasso_parameter[1]};
 
     for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
         float next_power[2];
         complex_multiply(
-            power[0],
-            power[1],
-            engine->lasso_parameter[0],
-            engine->lasso_parameter[1],
+            power[0], power[1],
+            engine->lasso_parameter[0], engine->lasso_parameter[1],
             next_power
         );
-
         coefficient_delta[index][0] =
             (delta_x * next_power[0] + delta_y * next_power[1]) /
             (float)LASSO_COEFFICIENT_COUNT;
         coefficient_delta[index][1] =
             (delta_y * next_power[0] - delta_x * next_power[1]) /
             (float)LASSO_COEFFICIENT_COUNT;
-
         power[0] = next_power[0];
         power[1] = next_power[1];
     }
 
     float best_coefficients[LASSO_COEFFICIENT_COUNT][2];
-    float best_preimages[MAX_ZEROS][2];
-    memcpy(
-        best_coefficients,
-        engine->lasso_start_coefficients,
-        sizeof(best_coefficients)
-    );
-    memcpy(best_preimages, engine->zero_preimages, sizeof(best_preimages));
+    float best_zero_preimages[MAX_FACTORS][2];
+    float best_pole_preimages[MAX_FACTORS][2];
+    memcpy(best_coefficients, engine->lasso_start_coefficients, sizeof(best_coefficients));
+    memcpy(best_zero_preimages, engine->zero_preimages, sizeof(best_zero_preimages));
+    memcpy(best_pole_preimages, engine->pole_preimages, sizeof(best_pole_preimages));
 
     float low = 0.0f;
     float high = 1.0f;
-
     for (int search = 0; search < 13; ++search) {
         float amount = 0.5f * (low + high);
         float candidate[LASSO_COEFFICIENT_COUNT][2];
-        float candidate_preimages[MAX_ZEROS][2];
-
+        float candidate_zero_preimages[MAX_FACTORS][2];
+        float candidate_pole_preimages[MAX_FACTORS][2];
         for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
-            candidate[index][0] =
-                engine->lasso_start_coefficients[index][0] +
-                amount * coefficient_delta[index][0];
-            candidate[index][1] =
-                engine->lasso_start_coefficients[index][1] +
-                amount * coefficient_delta[index][1];
+            candidate[index][0] = engine->lasso_start_coefficients[index][0] + amount * coefficient_delta[index][0];
+            candidate[index][1] = engine->lasso_start_coefficients[index][1] + amount * coefficient_delta[index][1];
         }
 
-        if (coefficients_are_valid(engine, candidate, candidate_preimages)) {
+        if (coefficients_are_valid(
+                engine, candidate, candidate_zero_preimages, candidate_pole_preimages
+            )) {
             low = amount;
             memcpy(best_coefficients, candidate, sizeof(best_coefficients));
-            memcpy(best_preimages, candidate_preimages, sizeof(best_preimages));
+            memcpy(best_zero_preimages, candidate_zero_preimages, sizeof(best_zero_preimages));
+            memcpy(best_pole_preimages, candidate_pole_preimages, sizeof(best_pole_preimages));
         } else {
             high = amount;
         }
     }
 
-    memcpy(
-        engine->lasso_coefficients,
-        best_coefficients,
-        sizeof(engine->lasso_coefficients)
-    );
-    memcpy(
-        engine->zero_preimages,
-        best_preimages,
-        sizeof(engine->zero_preimages)
-    );
+    memcpy(engine->lasso_coefficients, best_coefficients, sizeof(engine->lasso_coefficients));
+    memcpy(engine->zero_preimages, best_zero_preimages, sizeof(engine->zero_preimages));
+    memcpy(engine->pole_preimages, best_pole_preimages, sizeof(engine->pole_preimages));
     engine->dirty = true;
 
     LOGI(
         "lasso deformed: amount=%.4f budget=%.4f parameter=%.4g%+.4gi",
         low,
         lasso_derivative_budget(engine->lasso_coefficients),
-        engine->lasso_parameter[0],
-        engine->lasso_parameter[1]
+        engine->lasso_parameter[0], engine->lasso_parameter[1]
     );
 }
 
@@ -1026,13 +985,8 @@ static void advance_phase(struct engine *engine) {
     double now = monotonic_seconds();
     float dt = (float)(now - engine->last_animation_time);
     engine->last_animation_time = now;
-
-    if (dt <= 0.0f) {
-        return;
-    }
-    if (dt > 0.05f) {
-        dt = 0.05f;
-    }
+    if (dt <= 0.0f) return;
+    if (dt > 0.05f) dt = 0.05f;
 
     float noise = random_signed(engine);
     engine->phase_velocity += 1.15f * sqrtf(dt) * noise;
@@ -1048,17 +1002,16 @@ static void advance_phase(struct engine *engine) {
 }
 
 static void clear_gesture(struct engine *engine) {
-    engine->candidate_zero = -1;
-    engine->dragging_zero = false;
+    engine->candidate_kind = FACTOR_NONE;
+    engine->candidate_index = -1;
+    engine->dragging_factor = false;
     engine->lasso_candidate = false;
     engine->dragging_lasso = false;
     engine->moved = false;
 }
 
 static float pinch_distance(AInputEvent *event) {
-    if (AMotionEvent_getPointerCount(event) < 2) {
-        return 0.0f;
-    }
+    if (AMotionEvent_getPointerCount(event) < 2) return 0.0f;
     float dx = AMotionEvent_getX(event, 1) - AMotionEvent_getX(event, 0);
     float dy = AMotionEvent_getY(event, 1) - AMotionEvent_getY(event, 0);
     return hypotf(dx, dy);
@@ -1066,9 +1019,7 @@ static float pinch_distance(AInputEvent *event) {
 
 static void begin_pinch(struct engine *engine, AInputEvent *event) {
     float distance = pinch_distance(event);
-    if (distance < 8.0f) {
-        return;
-    }
+    if (distance < 8.0f) return;
     engine->pinching = true;
     engine->suppress_tap = true;
     engine->pinch_start_distance = distance;
@@ -1077,19 +1028,13 @@ static void begin_pinch(struct engine *engine, AInputEvent *event) {
 }
 
 static void update_pinch(struct engine *engine, AInputEvent *event) {
-    if (!engine->pinching || engine->pinch_start_distance < 8.0f) {
-        return;
-    }
-
+    if (!engine->pinching || engine->pinch_start_distance < 8.0f) return;
     float distance = pinch_distance(event);
-    if (distance < 8.0f) {
-        return;
-    }
+    if (distance < 8.0f) return;
 
     float zoom = engine->pinch_start_zoom * distance / engine->pinch_start_distance;
     if (zoom < 0.5f) zoom = 0.5f;
     if (zoom > 4.0f) zoom = 4.0f;
-
     if (fabsf(zoom - engine->zoom) > 1.0e-4f) {
         engine->zoom = zoom;
         engine->dirty = true;
@@ -1098,12 +1043,9 @@ static void update_pinch(struct engine *engine, AInputEvent *event) {
 
 static int32_t handle_input(struct android_app *app, AInputEvent *event) {
     struct engine *engine = app->userData;
-    if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION) {
-        return 0;
-    }
+    if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION) return 0;
 
-    int32_t action = AMotionEvent_getAction(event);
-    int32_t masked_action = action & AMOTION_EVENT_ACTION_MASK;
+    int32_t masked_action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
     size_t pointer_count = AMotionEvent_getPointerCount(event);
 
     switch (masked_action) {
@@ -1115,43 +1057,44 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
             if (pause_control_contains(engine, x, y)) {
                 toggle_pause(engine);
                 clear_gesture(engine);
-                engine->moved = true;
+                engine->suppress_tap = true;
                 return 1;
             }
-            if (close_control_contains(engine, x, y)) {
-                LOGI("lasso close requested");
-                ANativeActivity_finish(app->activity);
+
+            enum placement_kind selected;
+            if (placement_control_hit(engine, x, y, &selected)) {
+                engine->placement_kind = selected;
+                engine->dirty = true;
                 clear_gesture(engine);
-                engine->moved = true;
+                engine->suppress_tap = true;
+                LOGI(
+                    "placement selected: %s",
+                    selected == PLACEMENT_ZERO ? "zero" : "infinity"
+                );
                 return 1;
             }
 
             engine->down_x = x;
             engine->down_y = y;
-            engine->candidate_zero = nearest_zero(engine, x, y);
-            engine->dragging_zero = false;
+            nearest_factor(
+                engine, x, y, &engine->candidate_kind, &engine->candidate_index
+            );
+            engine->dragging_factor = false;
             engine->lasso_candidate = false;
             engine->dragging_lasso = false;
             engine->moved = false;
 
-            if (engine->candidate_zero < 0) {
+            if (engine->candidate_kind == FACTOR_NONE) {
                 engine->lasso_candidate = nearest_lasso_parameter(
-                    engine,
-                    x,
-                    y,
-                    engine->lasso_parameter
+                    engine, x, y, engine->lasso_parameter
                 );
-                if (engine->lasso_candidate) {
-                    begin_lasso_drag(engine);
-                }
+                if (engine->lasso_candidate) begin_lasso_drag(engine);
             }
             return 1;
         }
 
         case AMOTION_EVENT_ACTION_POINTER_DOWN:
-            if (pointer_count >= 2) {
-                begin_pinch(engine, event);
-            }
+            if (pointer_count >= 2) begin_pinch(engine, event);
             return 1;
 
         case AMOTION_EVENT_ACTION_MOVE: {
@@ -1159,20 +1102,19 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
                 update_pinch(engine, event);
                 return 1;
             }
-            if (pointer_count != 1) {
-                return 1;
-            }
+            if (pointer_count != 1) return 1;
 
             float x = AMotionEvent_getX(event, 0);
             float y = AMotionEvent_getY(event, 0);
-            float distance = hypotf(x - engine->down_x, y - engine->down_y);
-            if (distance > 10.0f) {
+            if (hypotf(x - engine->down_x, y - engine->down_y) > 10.0f) {
                 engine->moved = true;
             }
 
-            if (engine->moved && engine->candidate_zero >= 0) {
-                engine->dragging_zero = true;
-                move_zero(engine, engine->candidate_zero, x, y);
+            if (engine->moved && engine->candidate_kind != FACTOR_NONE) {
+                engine->dragging_factor = true;
+                move_factor(
+                    engine, engine->candidate_kind, engine->candidate_index, x, y
+                );
             } else if (engine->moved && engine->lasso_candidate) {
                 engine->dragging_lasso = true;
                 deform_lasso(engine, x, y);
@@ -1190,15 +1132,17 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
 
             float x = AMotionEvent_getX(event, 0);
             float y = AMotionEvent_getY(event, 0);
-
-            if (!engine->moved && !engine->dragging_zero && !engine->dragging_lasso) {
-                add_zero(engine, x, y);
-            } else if (engine->dragging_zero && engine->candidate_zero >= 0) {
+            if (!engine->moved && !engine->dragging_factor && !engine->dragging_lasso) {
+                add_factor(engine, engine->placement_kind, x, y);
+            } else if (engine->dragging_factor && engine->candidate_kind != FACTOR_NONE) {
+                const char *name = engine->candidate_kind == FACTOR_ZERO ? "zero" : "infinity";
+                float (*positions)[2] = engine->candidate_kind == FACTOR_ZERO
+                    ? engine->zero_positions : engine->pole_positions;
                 LOGI(
-                    "zero moved: index=%d z=%.6g%+.6gi",
-                    engine->candidate_zero,
-                    engine->zero_positions[engine->candidate_zero][0],
-                    engine->zero_positions[engine->candidate_zero][1]
+                    "%s moved: index=%d z=%.6g%+.6gi",
+                    name, engine->candidate_index,
+                    positions[engine->candidate_index][0],
+                    positions[engine->candidate_index][1]
                 );
             } else if (engine->dragging_lasso) {
                 LOGI(
@@ -1206,15 +1150,12 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
                     lasso_derivative_budget(engine->lasso_coefficients)
                 );
             }
-
             clear_gesture(engine);
             return 1;
         }
 
         case AMOTION_EVENT_ACTION_POINTER_UP:
-            if (engine->pinching) {
-                LOGI("lasso zoom: %.3f", engine->zoom);
-            }
+            if (engine->pinching) LOGI("lasso zoom: %.3f", engine->zoom);
             engine->pinching = false;
             engine->suppress_tap = true;
             clear_gesture(engine);
@@ -1233,29 +1174,24 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
 
 static void handle_command(struct android_app *app, int32_t command) {
     struct engine *engine = app->userData;
-
     switch (command) {
         case APP_CMD_INIT_WINDOW:
             if (app->window != NULL && engine->display == EGL_NO_DISPLAY) {
                 initialize_display(engine);
             }
             break;
-
         case APP_CMD_TERM_WINDOW:
             terminate_display(engine);
             break;
-
         case APP_CMD_WINDOW_RESIZED:
         case APP_CMD_CONTENT_RECT_CHANGED:
         case APP_CMD_CONFIG_CHANGED:
             update_surface_size(engine);
             break;
-
         case APP_CMD_GAINED_FOCUS:
             engine->last_animation_time = monotonic_seconds();
             engine->dirty = true;
             break;
-
         default:
             break;
     }
@@ -1267,7 +1203,8 @@ void android_main(struct android_app *app) {
         .display = EGL_NO_DISPLAY,
         .surface = EGL_NO_SURFACE,
         .context = EGL_NO_CONTEXT,
-        .candidate_zero = -1,
+        .candidate_kind = FACTOR_NONE,
+        .candidate_index = -1,
         .dirty = true,
         .logged_first_frame = false
     };
@@ -1284,21 +1221,12 @@ void android_main(struct android_app *app) {
         int timeout = can_animate ? 16 : (engine.dirty ? 0 : -1);
         int ident = ALooper_pollOnce(timeout, NULL, &events, (void **)&source);
 
-        if (ident >= 0 && source != NULL) {
-            source->process(app, source);
-        }
-
+        if (ident >= 0 && source != NULL) source->process(app, source);
         if (app->destroyRequested != 0) {
             terminate_display(&engine);
             return;
         }
-
-        if (engine.display != EGL_NO_DISPLAY && !engine.paused) {
-            advance_phase(&engine);
-        }
-
-        if (engine.dirty) {
-            draw_frame(&engine);
-        }
+        if (engine.display != EGL_NO_DISPLAY && !engine.paused) advance_phase(&engine);
+        if (engine.dirty) draw_frame(&engine);
     }
 }
