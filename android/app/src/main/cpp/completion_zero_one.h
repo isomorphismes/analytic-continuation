@@ -8,7 +8,7 @@ static bool completion_constrain_zero_one_symbol(
     const float zero_domain[2],
     const float one_domain[2]
 ) {
-    if (completion_remaining_complex_dimensions(state) < 2) {
+    if (completion_constraint_slots_remaining(state) < 2) {
         return false;
     }
 
