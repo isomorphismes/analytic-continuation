@@ -47,6 +47,16 @@ android {
     }
 
     signingConfigs {
+        // This key is intentionally checked in and non-secret. It signs only
+        // sideload/debug builds so every CI artifact can update the previous
+        // sideload build in place. Play/release signing remains separate.
+        create("sideloadDev") {
+            storeFile = file("debug/lasso-dev.p12")
+            storePassword = "lasso-dev"
+            keyAlias = "lasso-dev"
+            keyPassword = "lasso-dev"
+        }
+
         if (uploadSigningConfigured) {
             create("playUpload") {
                 storeFile = file(uploadKeystorePath!!)
@@ -58,6 +68,15 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            // The old .lasso debug package was signed with throwaway CI keys.
+            // Move once to a permanent sideload channel without requiring the
+            // user to uninstall that broken copy; future builds update in place.
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            signingConfig = signingConfigs.getByName("sideloadDev")
+        }
+
         getByName("release") {
             isMinifyEnabled = false
             signingConfigs.findByName("playUpload")?.let {
