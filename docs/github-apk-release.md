@@ -1,7 +1,7 @@
 # GitHub APK release boundary
 
-GitHub prereleases contain the live native convergence-disc explorer and the
-two offline guided movies. The APK is signed with the repository's public,
+GitHub prereleases open directly into the live native convergence-disc explorer
+and contain two offline guided movies. The APK is signed with the repository's public,
 test-only key so a later GitHub APK can update an earlier one. Google Play uses
 a separate private upload key.
 

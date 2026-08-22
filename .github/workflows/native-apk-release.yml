@@ -30,7 +30,7 @@ permissions:
 
 concurrency:
   group: native-apk-release-analytic-continuation
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   RELEASE_VERSION: ${{ inputs.release_version || '0.2.0' }}
@@ -197,7 +197,7 @@ jobs:
             ffmpeg -v error -i zeta-playback.png -vf 'crop=iw*0.9:ih*0.28:iw*0.05:ih*0.36,signalstats,metadata=print:file=zeta-screen-stats.txt' -frames:v 1 -f null -
             awk -F= '/lavfi.signalstats.YAVG/ { average = $2 } /lavfi.signalstats.YMAX/ { maximum = $2 } END { exit !(average > 25.0 && maximum > 80.0) }' zeta-screen-stats.txt
             adb logcat -c
-            adb shell am start -S -W -n org.isomorphisms.analyticcontinuation/.ExplorerActivity
+            adb shell am start -S -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p org.isomorphisms.analyticcontinuation
             sleep 4
             adb logcat -d > analytic-continuation-emulator.log
             adb exec-out screencap -p > analytic-continuation-emulator.png
@@ -252,7 +252,7 @@ jobs:
           release_title="Analytic Continuation Android test ${RELEASE_VERSION}"
           release_notes="Corrected Android test APK from commit ${GITHUB_SHA}.
 
-          This replaces v0.1.0: both guided movies are encoded as H.264 Constrained Baseline, and CI actually played and captured each movie in an Android emulator before publication. The APK also includes the live native EGL/OpenGL ES convergence explorer with zero and infinity controls.
+          This replaces v0.1.0: the app now opens directly into the live native EGL/OpenGL ES convergence explorer with zero and infinity controls. Both guided movies are encoded as H.264 Constrained Baseline, and CI actually played and captured each movie in an Android emulator before publication.
 
           It uses the same repository test-only signing key as v0.1.0, so it can be installed as an update. It is not the separately signed Google Play production build."
 
