@@ -1,0 +1,67 @@
+name: Publish Lasso Dev Release
+
+on:
+  push:
+    branches:
+      - lasso
+    paths:
+      - 'android/**'
+      - '.github/workflows/lasso-dev-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lasso-dev-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install native Android toolchain
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Build Lasso Dev APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Verify permanent sideload signature
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' /tmp/apksigner.txt
+          grep -Fiq 'SHA-256 digest: 17:71:80:CA:BE:DA:36:9A:BF:1C:B0:6B:12:DD:23:9C:18:6F:21:93:05:A3:2F:F2:45:1E:BD:51:73:7C:EB:8A' /tmp/apksigner.txt
+
+      - name: Prepare public release assets
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk analytic-continuation-lasso-dev.apk
+          sha256sum analytic-continuation-lasso-dev.apk > analytic-continuation-lasso-dev.apk.sha256
+
+      - name: Publish public GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=lasso-dev-v0.1.0
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" analytic-continuation-lasso-dev.apk analytic-continuation-lasso-dev.apk.sha256 --clobber
+          else
+            gh release create "$TAG" \
+              analytic-continuation-lasso-dev.apk \
+              analytic-continuation-lasso-dev.apk.sha256 \
+              --target "$GITHUB_SHA" \
+              --title 'Lasso Dev v0.1.0' \
+              --notes 'Public sideload build of the analytic-continuation lasso experiment. Package: org.isomorphisms.analyticcontinuation.lasso.dev. Signed with the repository’s permanent non-production sideload key so subsequent Lasso Dev builds can update in place.'
+          fi
