@@ -22,6 +22,15 @@ val uploadSigningConfigured = listOf(
     uploadKeyPassword,
 ).all { !it.isNullOrBlank() }
 
+val sideloadKeystoreSource = file("debug/lasso-dev.p12.b64")
+val sideloadKeystoreFile = layout.buildDirectory.file("sideload-signing/lasso-dev.p12").get().asFile
+if (!sideloadKeystoreFile.exists()) {
+    sideloadKeystoreFile.parentFile.mkdirs()
+    sideloadKeystoreFile.writeBytes(
+        java.util.Base64.getDecoder().decode(sideloadKeystoreSource.readText().trim())
+    )
+}
+
 android {
     namespace = "org.isomorphisms.analyticcontinuation"
     compileSdk = 36
@@ -51,7 +60,7 @@ android {
         // sideload/debug builds so every CI artifact can update the previous
         // sideload build in place. Play/release signing remains separate.
         create("sideloadDev") {
-            storeFile = file("debug/lasso-dev.p12")
+            storeFile = sideloadKeystoreFile
             storePassword = "lasso-dev"
             keyAlias = "lasso-dev"
             keyPassword = "lasso-dev"
