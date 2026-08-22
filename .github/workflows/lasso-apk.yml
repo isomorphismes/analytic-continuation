@@ -70,7 +70,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Launch, add a zero, pause, and close
+      - name: Launch, deform, add a zero, pause, and close
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -89,6 +89,12 @@ jobs:
             grep -Fq 'lasso ready:' lasso-emulator.log
             grep -Fq 'outside=domain-coloring' lasso-emulator.log
             grep -Fq 'lasso first frame:' lasso-emulator.log
+
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; radius=$((42 * min_side / 100)); center_x=$((width / 2)); center_y=$((height / 2)); start_x=$((center_x + radius)); end_x=$((start_x + 70)); adb shell input swipe "$start_x" "$center_y" "$end_x" "$center_y" 500
+            sleep 1
+            adb logcat -d > lasso-emulator.log
+            grep -Fq 'lasso deformed:' lasso-emulator.log
+            grep -Fq 'lasso drag finished:' lasso-emulator.log
 
             set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; adb shell input tap "$((width / 2))" "$((height / 2))"
             sleep 1
