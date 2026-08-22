@@ -250,16 +250,22 @@ void main() {
 
     float placement_radius = clamp(0.048 * min(u_resolution.x, u_resolution.y), 26.0, 38.0);
     vec2 zero_center = vec2(placement_radius + 16.0, placement_radius + 16.0);
+    bool zero_selected = u_placement_kind == 0;
     float zero_disk = circle_mask(gl_FragCoord.xy, zero_center, placement_radius);
-    color = mix(color, vec3(0.94), zero_disk * 0.86);
+    color = mix(
+        color,
+        zero_selected ? vec3(0.94) : vec3(0.04),
+        zero_disk * 0.86
+    );
 
+    vec3 zero_mark_color = zero_selected ? vec3(0.05) : vec3(0.96);
     float zero_mark = ring_mask(
         gl_FragCoord.xy,
         zero_center,
         placement_radius * 0.40,
         placement_radius * 0.25
     );
-    color = mix(color, vec3(0.05), zero_mark);
+    color = mix(color, zero_mark_color, zero_mark);
 
     frag_color = vec4(color, 1.0);
 }
