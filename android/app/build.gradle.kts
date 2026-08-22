@@ -39,8 +39,8 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        // Keep the experiment installable beside the main explorer.
-        applicationId = "org.isomorphisms.analyticcontinuation.lasso"
+        // Mainline/Play keeps the established application identity.
+        applicationId = "org.isomorphisms.analyticcontinuation"
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode
@@ -81,10 +81,9 @@ android {
 
     buildTypes {
         getByName("debug") {
-            // The old .lasso debug package was signed with throwaway CI keys.
-            // Move once to a permanent sideload channel without requiring the
-            // user to uninstall that broken copy; future builds update in place.
-            applicationIdSuffix = ".dev"
+            // Preserve the permanent Lasso Dev sideload/update channel while
+            // release builds keep the established Play package name.
+            applicationIdSuffix = ".lasso.dev"
             versionNameSuffix = "-dev"
             manifestPlaceholders["appLabel"] = "Analytic Continuation — Lasso Dev"
             signingConfig = signingConfigs.getByName("sideloadDev")
