@@ -53,6 +53,11 @@ jobs:
           unzip -l android/app/build/outputs/apk/debug/app-debug.apk > /tmp/apk-files.txt
           grep -Eq 'res/(mipmap|drawable).*(ic_launcher|ic_lasso)' /tmp/apk-files.txt
 
+      - name: Verify stable sideload signing identity
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk > /tmp/apk-signing.txt
+          grep -Fqi '27eee69b1cbeebc30eab35fe7eb5459c542784b4ccc68453a372cb6802ccf7cf' /tmp/apk-signing.txt
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: analytic-continuation-lasso-ui-apk
@@ -102,7 +107,7 @@ jobs:
           script: |
             adb install -r artifacts/app-debug.apk
             adb logcat -c
-            adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso/org.isomorphisms.analyticcontinuation.ExplorerActivity
+            adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
             sleep 3
             adb logcat -d > lasso-ui-emulator.log
             grep -Fq 'lasso ready:' lasso-ui-emulator.log
