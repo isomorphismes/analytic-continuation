@@ -2,7 +2,7 @@
 precision highp float;
 precision highp int;
 
-#define MAX_ZEROS 32
+#define MAX_FACTORS 32
 #define LASSO_COEFFICIENT_COUNT 5
 
 in vec2 v_ndc;
@@ -10,12 +10,16 @@ out vec4 frag_color;
 
 uniform vec2 u_resolution;
 uniform int u_zero_count;
-uniform vec2 u_zero_preimages[MAX_ZEROS];
-uniform vec2 u_zero_positions[MAX_ZEROS];
+uniform int u_pole_count;
+uniform vec2 u_zero_preimages[MAX_FACTORS];
+uniform vec2 u_pole_preimages[MAX_FACTORS];
+uniform vec2 u_zero_positions[MAX_FACTORS];
+uniform vec2 u_pole_positions[MAX_FACTORS];
 uniform vec2 u_lasso_coefficients[LASSO_COEFFICIENT_COUNT];
 uniform float u_phase;
 uniform int u_paused;
 uniform float u_zoom;
+uniform int u_placement_kind;
 
 const float TAU = 6.28318530717958647692;
 const float LOG_10 = 2.30258509299404568402;
@@ -44,21 +48,17 @@ vec2 lasso_map_and_derivative(vec2 w, float amount, out vec2 derivative) {
         float degree = float(index + 2);
         vec2 next_power = complex_multiply(power, w);
         vec2 coefficient = amount * u_lasso_coefficients[index];
-
         mapped += complex_multiply(coefficient, next_power);
         derivative += degree * complex_multiply(coefficient, power);
         power = next_power;
     }
-
     return mapped;
 }
 
 vec2 inverse_lasso(vec2 z) {
     vec2 w = z;
-
     for (int stage = 1; stage <= 4; ++stage) {
         float amount = 0.25 * float(stage);
-
         for (int iteration = 0; iteration < 2; ++iteration) {
             vec2 derivative;
             vec2 mapped = lasso_map_and_derivative(w, amount, derivative);
@@ -70,8 +70,16 @@ vec2 inverse_lasso(vec2 z) {
             w -= correction;
         }
     }
-
     return w;
+}
+
+vec2 blaschke_factor(vec2 w, vec2 a) {
+    vec2 numerator = w - a;
+    vec2 denominator = vec2(
+        1.0 - a.x * w.x - a.y * w.y,
+        -a.x * w.y + a.y * w.x
+    );
+    return complex_divide(numerator, denominator);
 }
 
 float positive_fract(float value) {
@@ -119,6 +127,13 @@ float circle_mask(vec2 point, vec2 center, float radius) {
     return 1.0 - smoothstep(radius - 1.25, radius + 1.25, length(point - center));
 }
 
+float ring_mask(vec2 point, vec2 center, float outer_radius, float inner_radius) {
+    return max(
+        0.0,
+        circle_mask(point, center, outer_radius) - circle_mask(point, center, inner_radius)
+    );
+}
+
 float line_mask(vec2 point, vec2 start, vec2 finish, float half_width) {
     vec2 segment = finish - start;
     float denominator = max(dot(segment, segment), 1.0e-6);
@@ -131,31 +146,31 @@ void main() {
     float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y) * u_zoom;
     vec2 pixel = gl_FragCoord.xy - 0.5 * u_resolution;
     vec2 z = pixel / pixel_radius;
-
     vec2 w = inverse_lasso(z);
     float w_radius = length(w);
 
-    // Preserve the original domain-coloring phase and modulus while doing the
-    // Blaschke accumulation with one atan() and one log() after the loop.
     vec2 phase_product = vec2(1.0, 0.0);
     float modulus_product = 1.0;
 
-    for (int index = 0; index < MAX_ZEROS; ++index) {
-        if (index >= u_zero_count) {
-            break;
-        }
-
-        vec2 a = u_zero_preimages[index];
-        vec2 numerator = w - a;
-        vec2 denominator = vec2(
-            1.0 - a.x * w.x - a.y * w.y,
-            -a.x * w.y + a.y * w.x
-        );
-        vec2 factor = complex_divide(numerator, denominator);
+    for (int index = 0; index < MAX_FACTORS; ++index) {
+        if (index >= u_zero_count) break;
+        vec2 factor = blaschke_factor(w, u_zero_preimages[index]);
         float factor_radius = max(length(factor), 1.0e-8);
-
         phase_product = complex_multiply(phase_product, factor / factor_radius);
         modulus_product *= clamp(factor_radius, 1.0e-4, 1.0e4);
+        modulus_product = clamp(modulus_product, 1.0e-12, 1.0e12);
+    }
+
+    for (int index = 0; index < MAX_FACTORS; ++index) {
+        if (index >= u_pole_count) break;
+        vec2 factor = blaschke_factor(w, u_pole_preimages[index]);
+        float factor_radius = max(length(factor), 1.0e-8);
+        vec2 phase_unit = factor / factor_radius;
+        phase_product = complex_multiply(
+            phase_product,
+            vec2(phase_unit.x, -phase_unit.y)
+        );
+        modulus_product *= 1.0 / clamp(factor_radius, 1.0e-4, 1.0e4);
         modulus_product = clamp(modulus_product, 1.0e-12, 1.0e12);
     }
 
@@ -176,33 +191,35 @@ void main() {
     float boundary = 1.0 - smoothstep(1.2, 3.2, edge_distance_pixels);
     color = mix(color, vec3(0.97, 0.97, 0.94), boundary);
 
-    for (int index = 0; index < MAX_ZEROS; ++index) {
-        if (index >= u_zero_count) {
-            break;
-        }
-        float zero_distance_pixels = length(z - u_zero_positions[index]) * pixel_radius;
-        float outer = 1.0 - smoothstep(7.0, 9.0, zero_distance_pixels);
-        float inner = 1.0 - smoothstep(3.0, 4.5, zero_distance_pixels);
+    for (int index = 0; index < MAX_FACTORS; ++index) {
+        if (index >= u_zero_count) break;
+        float distance_pixels = length(z - u_zero_positions[index]) * pixel_radius;
+        float outer = 1.0 - smoothstep(7.0, 9.0, distance_pixels);
+        float inner = 1.0 - smoothstep(3.0, 4.5, distance_pixels);
         color = mix(color, vec3(0.04), outer);
         color = mix(color, vec3(0.98), inner);
     }
 
-    float control_radius = clamp(0.052 * min(u_resolution.x, u_resolution.y), 28.0, 42.0);
-    vec2 pause_center = vec2(
-        control_radius + 16.0,
-        u_resolution.y - control_radius - 16.0
-    );
-    vec2 close_center = vec2(
-        u_resolution.x - 4.0 * control_radius - 16.0,
-        u_resolution.y - control_radius - 16.0
-    );
-    float pause_disk = circle_mask(gl_FragCoord.xy, pause_center, control_radius);
-    float close_disk = circle_mask(gl_FragCoord.xy, close_center, control_radius);
-    color = mix(color, vec3(0.04), max(pause_disk, close_disk) * 0.78);
+    for (int index = 0; index < MAX_FACTORS; ++index) {
+        if (index >= u_pole_count) break;
+        float distance_pixels = length(z - u_pole_positions[index]) * pixel_radius;
+        float outer = 1.0 - smoothstep(7.0, 9.0, distance_pixels);
+        float inner = 1.0 - smoothstep(3.0, 4.5, distance_pixels);
+        color = mix(color, vec3(0.98), outer);
+        color = mix(color, vec3(0.04), inner);
+    }
 
-    float mark = 0.0;
+    float pause_radius = clamp(0.052 * min(u_resolution.x, u_resolution.y), 28.0, 42.0);
+    vec2 pause_center = vec2(
+        pause_radius + 16.0,
+        u_resolution.y - pause_radius - 16.0
+    );
+    float pause_disk = circle_mask(gl_FragCoord.xy, pause_center, pause_radius);
+    color = mix(color, vec3(0.04), pause_disk * 0.78);
+
+    float pause_mark = 0.0;
     if (u_paused == 0) {
-        mark = max(
+        pause_mark = max(
             line_mask(
                 gl_FragCoord.xy,
                 pause_center + vec2(-8.0, -11.0),
@@ -220,35 +237,63 @@ void main() {
         vec2 left_top = pause_center + vec2(-9.0, -12.0);
         vec2 point = pause_center + vec2(11.0, 0.0);
         vec2 left_bottom = pause_center + vec2(-9.0, 12.0);
-        mark = max(
+        pause_mark = max(
             line_mask(gl_FragCoord.xy, left_top, point, 2.2),
             line_mask(gl_FragCoord.xy, point, left_bottom, 2.2)
         );
-        mark = max(
-            mark,
+        pause_mark = max(
+            pause_mark,
             line_mask(gl_FragCoord.xy, left_bottom, left_top, 2.2)
         );
     }
+    color = mix(color, vec3(0.98), pause_mark);
 
-    mark = max(
-        mark,
-        line_mask(
+    float placement_radius = clamp(0.048 * min(u_resolution.x, u_resolution.y), 26.0, 38.0);
+    vec2 zero_center = vec2(placement_radius + 16.0, placement_radius + 16.0);
+    vec2 infinity_center = zero_center + vec2(2.0 * placement_radius + 14.0, 0.0);
+
+    bool zero_selected = u_placement_kind == 0;
+    bool infinity_selected = u_placement_kind == 1;
+    float zero_disk = circle_mask(gl_FragCoord.xy, zero_center, placement_radius);
+    float infinity_disk = circle_mask(gl_FragCoord.xy, infinity_center, placement_radius);
+    color = mix(
+        color,
+        zero_selected ? vec3(0.94) : vec3(0.04),
+        zero_disk * 0.86
+    );
+    color = mix(
+        color,
+        infinity_selected ? vec3(0.94) : vec3(0.04),
+        infinity_disk * 0.86
+    );
+
+    vec3 zero_mark_color = zero_selected ? vec3(0.05) : vec3(0.96);
+    float zero_mark = ring_mask(
+        gl_FragCoord.xy,
+        zero_center,
+        placement_radius * 0.40,
+        placement_radius * 0.25
+    );
+    color = mix(color, zero_mark_color, zero_mark);
+
+    vec3 infinity_mark_color = infinity_selected ? vec3(0.05) : vec3(0.96);
+    float loop_radius = placement_radius * 0.27;
+    float loop_offset = placement_radius * 0.20;
+    float infinity_mark = max(
+        ring_mask(
             gl_FragCoord.xy,
-            close_center + vec2(-10.0, -10.0),
-            close_center + vec2(10.0, 10.0),
-            2.2
+            infinity_center - vec2(loop_offset, 0.0),
+            loop_radius,
+            loop_radius * 0.58
+        ),
+        ring_mask(
+            gl_FragCoord.xy,
+            infinity_center + vec2(loop_offset, 0.0),
+            loop_radius,
+            loop_radius * 0.58
         )
     );
-    mark = max(
-        mark,
-        line_mask(
-            gl_FragCoord.xy,
-            close_center + vec2(-10.0, 10.0),
-            close_center + vec2(10.0, -10.0),
-            2.2
-        )
-    );
-    color = mix(color, vec3(0.98), mark);
+    color = mix(color, infinity_mark_color, infinity_mark);
 
     frag_color = vec4(color, 1.0);
 }
