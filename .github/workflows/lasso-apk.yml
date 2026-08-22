@@ -115,7 +115,7 @@ jobs:
             grep -Fq 'zeros=1 poles=1 placement=zero' lasso-emulator.log
             grep -Fq 'outside=domain-coloring' lasso-emulator.log
             grep -Fq 'lasso first frame:' lasso-emulator.log
-            steps_before=$(sed -n 's/.*holomorphic walk: workers=3 steps=\([0-9][0-9]*\).*/\1/p' lasso-emulator.log | tail -1); test -n "$steps_before"; test "$steps_before" -gt 0
+            steps_before=$(sed -n 's/.*holomorphic walk: workers=3 steps=\([0-9][0-9]*\).*/\1/p' lasso-emulator.log | tail -1); test -n "$steps_before"; test "$steps_before" -gt 0; printf '%s\n' "$steps_before" > /tmp/holomorphic-steps-before
 
             set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; control_radius=$((52 * min_side / 1000)); if [ "$control_radius" -lt 28 ]; then control_radius=28; fi; if [ "$control_radius" -gt 42 ]; then control_radius=42; fi; adb shell input tap "$((control_radius + 16))" "$((control_radius + 16))"
             sleep 1
@@ -144,7 +144,7 @@ jobs:
             sleep 3
             adb logcat -d > lasso-emulator.log
             grep -Fq 'holomorphic walk running' lasso-emulator.log
-            steps_after=$(sed -n 's/.*holomorphic walk: workers=3 steps=\([0-9][0-9]*\).*/\1/p' lasso-emulator.log | tail -1); test -n "$steps_after"; test "$steps_after" -gt "$steps_before"
+            steps_before=$(cat /tmp/holomorphic-steps-before); steps_after=$(sed -n 's/.*holomorphic walk: workers=3 steps=\([0-9][0-9]*\).*/\1/p' lasso-emulator.log | tail -1); test -n "$steps_after"; test "$steps_after" -gt "$steps_before"
             grep -Eq 'holomorphic walk: workers=3 steps=[0-9]+ .*zeros=2 poles=1' lasso-emulator.log
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable|FATAL EXCEPTION' lasso-emulator.log
             adb exec-out screencap -p > lasso-emulator.png
