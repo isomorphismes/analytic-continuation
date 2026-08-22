@@ -31,6 +31,14 @@ static double modular_divisor_power_sum(int n, int power) {
     return sum;
 }
 
+static double complex modular_complex_power_24(double complex value) {
+    double complex square = value * value;
+    double complex fourth = square * square;
+    double complex eighth = fourth * fourth;
+    double complex sixteenth = eighth * eighth;
+    return sixteenth * eighth;
+}
+
 static double complex modular_reduce_tau(double complex tau) {
     for (int step = 0; step < 16; ++step) {
         double shift = nearbyint(creal(tau));
@@ -76,7 +84,7 @@ static bool modular_forms_evaluate(
     double complex delta = q;
     q_power = q;
     for (int n = 1; n <= q_terms; ++n) {
-        delta *= cpow(1.0 - q_power, 24.0);
+        delta *= modular_complex_power_24(1.0 - q_power);
         q_power *= q;
     }
 
