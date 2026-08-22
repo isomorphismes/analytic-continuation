@@ -31,7 +31,7 @@ jobs:
           git clone --branch mobile-apk --single-branch --depth 1 \
             https://github.com/isomorphisms/group-explorer.git group-explorer
           cd group-explorer
-          test "$(git rev-parse HEAD)" = "0ed6dcfb6a7f579b28dbd0ee06ccc78c744d0028"
+          test "$(git rev-parse HEAD)" = "48db492b58751fbd93ec334e45864ff3532101fc"
           npm test
 
       - name: Set up Java
