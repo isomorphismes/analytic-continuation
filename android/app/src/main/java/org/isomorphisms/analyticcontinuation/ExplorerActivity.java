@@ -40,7 +40,7 @@ public final class ExplorerActivity extends NativeActivity {
         if (radius < 28.0f) radius = 28.0f;
         if (radius > 42.0f) radius = 42.0f;
 
-        float centerX = width - radius - 16.0f;
+        float centerX = width - 4.0f * radius - 16.0f;
         float centerY = radius + 16.0f;
         return Math.hypot(x - centerX, y - centerY) <= radius;
     }
