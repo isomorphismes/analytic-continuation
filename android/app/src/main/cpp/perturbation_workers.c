@@ -19,6 +19,7 @@ struct perturbation_view {
     float center[2];
     float half_height;
     float aspect;
+    uint64_t generation;
 };
 
 struct perturbation_slot {
@@ -160,13 +161,18 @@ static void *worker_main(void *argument) {
         );
 
         pthread_mutex_lock(&system->mutex);
-        if (system->running) {
+        if (system->running && view.generation == system->view.generation) {
             struct perturbation_slot *slot = &system->slots[worker_index];
             slot->descriptor = descriptor;
             slot->initial_phase_amplitude = initial_phase;
             slot->decay_seconds = decay_seconds;
             slot->born_nanoseconds = monotonic_nanoseconds();
             slot->ready = true;
+        } else if (system->running) {
+            // The camera changed while this descriptor was being built.
+            // Discard it rather than allowing its exterior kernel pole to
+            // become visible in the new panel.
+            system->slots[worker_index].request_new = true;
         }
         pthread_mutex_unlock(&system->mutex);
     }
@@ -255,6 +261,7 @@ bool perturbation_system_start(struct perturbation_system **system_out) {
     system->view.center[1] = 0.0f;
     system->view.half_height = 3.5f;
     system->view.aspect = 1.0f;
+    system->view.generation = UINT64_C(1);
 
     uint64_t seed_time = monotonic_nanoseconds();
     uint32_t seed = (uint32_t)(seed_time ^ (seed_time >> 32));
@@ -326,11 +333,29 @@ void perturbation_system_set_view(
         return;
     }
 
+    float new_half_height = fmaxf(half_height, 1.0e-4f);
+    float new_aspect = fmaxf(aspect, 1.0e-3f);
+
     pthread_mutex_lock(&system->mutex);
-    system->view.center[0] = center_x;
-    system->view.center[1] = center_y;
-    system->view.half_height = fmaxf(half_height, 1.0e-4f);
-    system->view.aspect = fmaxf(aspect, 1.0e-3f);
+    bool changed = center_x != system->view.center[0]
+        || center_y != system->view.center[1]
+        || new_half_height != system->view.half_height
+        || new_aspect != system->view.aspect;
+
+    if (changed) {
+        system->view.center[0] = center_x;
+        system->view.center[1] = center_y;
+        system->view.half_height = new_half_height;
+        system->view.aspect = new_aspect;
+        system->view.generation += UINT64_C(1);
+
+        memset(&system->published, 0, sizeof(system->published));
+        for (int index = 0; index < PERTURBATION_WORKER_COUNT; ++index) {
+            system->slots[index].ready = false;
+            system->slots[index].request_new = true;
+        }
+        pthread_cond_broadcast(&system->condition);
+    }
     pthread_mutex_unlock(&system->mutex);
 }
 
