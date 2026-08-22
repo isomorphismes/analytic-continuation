@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .continuation import ContinuationPlanError, plan_continuation_discs
 from .functions import FUNCTION_HELP, FunctionSpecError, make_complex_function
 from .spec import MovieSpecError, load_movie_spec
 
@@ -28,6 +29,11 @@ def main(arguments: list[str] | None = None) -> int:
         specification_path = Path(parsed.specification).resolve()
         movie = load_movie_spec(specification_path)
         complex_function = make_complex_function(movie.function)
+        if movie.view.disc_reveal is not None:
+            plan_continuation_discs(
+                complex_function,
+                movie.view.disc_reveal.path,
+            )
 
         if parsed.command == "validate":
             print(f"valid: {complex_function.label} — {complex_function.analytic_status}")
@@ -46,7 +52,12 @@ def main(arguments: list[str] | None = None) -> int:
             environment = os.environ.copy()
             environment[SPEC_ENVIRONMENT_VARIABLE] = str(specification_path)
             return subprocess.run(command, env=environment, check=False).returncode
-    except (FunctionSpecError, MovieSpecError, RuntimeError) as error:
+    except (
+        ContinuationPlanError,
+        FunctionSpecError,
+        MovieSpecError,
+        RuntimeError,
+    ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
