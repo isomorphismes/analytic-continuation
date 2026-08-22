@@ -148,7 +148,7 @@ jobs:
             adb shell pidof -s org.isomorphisms.analyticcontinuation | tr -d '\r' | grep -Eq '^[0-9]+$'
             grep -Fq 'continuation view enabled' analytic-continuation-emulator.log
             grep -Eq 'continuation seeded at 0([.]0+)?\+0([.]0+)?i radius=1([.]0+)?' analytic-continuation-emulator.log
-            adb shell input tap 640 360
+            adb shell input tap "$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print int(dimensions[1] / 2) }' analytic-continuation-emulator.log)" "$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print int(dimensions[2] / 2) }' analytic-continuation-emulator.log)"
             sleep 1
             adb logcat -d > analytic-continuation-emulator.log
             adb exec-out screencap -p > analytic-continuation-emulator.png
