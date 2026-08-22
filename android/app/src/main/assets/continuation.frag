@@ -3,18 +3,78 @@ precision highp float;
 precision highp int;
 
 #define MAX_ZEROS 32
+#define LASSO_COEFFICIENT_COUNT 5
 
 in vec2 v_ndc;
 out vec4 frag_color;
 
 uniform vec2 u_resolution;
 uniform int u_zero_count;
-uniform vec2 u_zeros[MAX_ZEROS];
+uniform vec2 u_zero_preimages[MAX_ZEROS];
+uniform vec2 u_zero_positions[MAX_ZEROS];
+uniform vec2 u_lasso_coefficients[LASSO_COEFFICIENT_COUNT];
 uniform float u_phase;
 uniform int u_paused;
 
 const float TAU = 6.28318530717958647692;
 const float LOG_10 = 2.30258509299404568402;
+
+vec2 complex_multiply(vec2 left, vec2 right) {
+    return vec2(
+        left.x * right.x - left.y * right.y,
+        left.x * right.y + left.y * right.x
+    );
+}
+
+vec2 complex_divide(vec2 numerator, vec2 denominator) {
+    float scale = max(dot(denominator, denominator), 1.0e-10);
+    return vec2(
+        numerator.x * denominator.x + numerator.y * denominator.y,
+        numerator.y * denominator.x - numerator.x * denominator.y
+    ) / scale;
+}
+
+vec2 lasso_map_and_derivative(vec2 w, float amount, out vec2 derivative) {
+    vec2 mapped = w;
+    derivative = vec2(1.0, 0.0);
+    vec2 power = w;
+
+    for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
+        float degree = float(index + 2);
+        vec2 next_power = complex_multiply(power, w);
+        vec2 coefficient = amount * u_lasso_coefficients[index];
+
+        mapped += complex_multiply(coefficient, next_power);
+        derivative += degree * complex_multiply(coefficient, power);
+        power = next_power;
+    }
+
+    return mapped;
+}
+
+vec2 inverse_lasso(vec2 z) {
+    // Continue the inverse from the identity map to the current lasso in four
+    // small parameter steps. This gives a stable branch on both sides of the
+    // white curve instead of clipping the exterior.
+    vec2 w = z;
+
+    for (int stage = 1; stage <= 4; ++stage) {
+        float amount = 0.25 * float(stage);
+
+        for (int iteration = 0; iteration < 2; ++iteration) {
+            vec2 derivative;
+            vec2 mapped = lasso_map_and_derivative(w, amount, derivative);
+            vec2 correction = complex_divide(mapped - z, derivative);
+            float correction_length = length(correction);
+            if (correction_length > 0.55) {
+                correction *= 0.55 / correction_length;
+            }
+            w -= correction;
+        }
+    }
+
+    return w;
+}
 
 float positive_fract(float value) {
     return value - floor(value);
@@ -73,12 +133,11 @@ void main() {
     float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y);
     vec2 pixel = gl_FragCoord.xy - 0.5 * u_resolution;
     vec2 z = pixel / pixel_radius;
-    float radius = length(z);
 
-    vec3 outside = vec3(0.035, 0.040, 0.052);
-    float grid_a = 0.5 + 0.5 * cos((gl_FragCoord.x + gl_FragCoord.y) * TAU / 42.0);
-    float grid_b = 0.5 + 0.5 * cos((gl_FragCoord.x - gl_FragCoord.y) * TAU / 42.0);
-    outside += 0.008 * vec3(grid_a * grid_b);
+    // w is the analytically continued inverse coordinate. The same domain
+    // coloring is evaluated inside and outside the lasso.
+    vec2 w = inverse_lasso(z);
+    float w_radius = length(w);
 
     float phase = u_phase;
     float log_modulus = 0.0;
@@ -88,13 +147,13 @@ void main() {
             break;
         }
 
-        vec2 a = u_zeros[index];
-        vec2 numerator = z - a;
+        vec2 a = u_zero_preimages[index];
+        vec2 numerator = w - a;
 
-        // denominator = 1 - conjugate(a) * z
+        // denominator = 1 - conjugate(a) * w
         vec2 denominator = vec2(
-            1.0 - a.x * z.x - a.y * z.y,
-            -a.x * z.y + a.y * z.x
+            1.0 - a.x * w.x - a.y * w.y,
+            -a.x * w.y + a.y * w.x
         );
 
         phase += atan(numerator.y, numerator.x) - atan(denominator.y, denominator.x);
@@ -109,32 +168,39 @@ void main() {
         + 3.0 * positive_fract(hue_degrees / 100.0);
     vec3 color = hcl_to_srgb(hue_degrees, 45.0, lightness);
 
-    float disk_edge = 1.0 - smoothstep(1.0, 1.0 + 2.0 / pixel_radius, radius);
-    color = mix(outside, color, disk_edge);
-
-    // The white lasso is exactly the |z| = 1 boundary. Every finite
-    // Blaschke factor has modulus one here, independent of the zero positions.
-    float edge_distance_pixels = abs(radius - 1.0) * pixel_radius;
+    // psi maps |w|=1 to the deformable lasso. Since every finite Blaschke
+    // factor has modulus one on |w|=1, the white curve remains exactly
+    // |f(z)|=1 after every accepted deformation.
+    vec2 unit_w = w_radius > 1.0e-6 ? w / w_radius : vec2(1.0, 0.0);
+    vec2 boundary_derivative;
+    lasso_map_and_derivative(unit_w, 1.0, boundary_derivative);
+    float edge_distance_pixels =
+        abs(w_radius - 1.0) * max(length(boundary_derivative), 0.15) * pixel_radius;
     float boundary = 1.0 - smoothstep(1.2, 3.2, edge_distance_pixels);
     color = mix(color, vec3(0.97, 0.97, 0.94), boundary);
 
-    // Interior zero markers. Repeated taps at essentially the same place are
-    // represented by overlapping factors and therefore higher multiplicity.
+    // Zero markers stay fixed in physical z coordinates while the lasso moves.
     for (int index = 0; index < MAX_ZEROS; ++index) {
         if (index >= u_zero_count) {
             break;
         }
-        float zero_distance_pixels = length(z - u_zeros[index]) * pixel_radius;
+        float zero_distance_pixels = length(z - u_zero_positions[index]) * pixel_radius;
         float outer = 1.0 - smoothstep(7.0, 9.0, zero_distance_pixels);
         float inner = 1.0 - smoothstep(3.0, 4.5, zero_distance_pixels);
         color = mix(color, vec3(0.04), outer);
         color = mix(color, vec3(0.98), inner);
     }
 
-    // Minimal controls: pause/run at upper left, clear at upper right.
+    // Minimal controls: pause/run at upper left, clear zeros at upper right.
     float control_radius = clamp(0.052 * min(u_resolution.x, u_resolution.y), 28.0, 42.0);
-    vec2 pause_center = vec2(control_radius + 16.0, u_resolution.y - control_radius - 16.0);
-    vec2 clear_center = vec2(u_resolution.x - control_radius - 16.0, u_resolution.y - control_radius - 16.0);
+    vec2 pause_center = vec2(
+        control_radius + 16.0,
+        u_resolution.y - control_radius - 16.0
+    );
+    vec2 clear_center = vec2(
+        u_resolution.x - control_radius - 16.0,
+        u_resolution.y - control_radius - 16.0
+    );
     float pause_disk = circle_mask(gl_FragCoord.xy, pause_center, control_radius);
     float clear_disk = circle_mask(gl_FragCoord.xy, clear_center, control_radius);
     color = mix(color, vec3(0.04), max(pause_disk, clear_disk) * 0.78);
@@ -142,8 +208,18 @@ void main() {
     float mark = 0.0;
     if (u_paused == 0) {
         mark = max(
-            line_mask(gl_FragCoord.xy, pause_center + vec2(-8.0, -11.0), pause_center + vec2(-8.0, 11.0), 2.2),
-            line_mask(gl_FragCoord.xy, pause_center + vec2(8.0, -11.0), pause_center + vec2(8.0, 11.0), 2.2)
+            line_mask(
+                gl_FragCoord.xy,
+                pause_center + vec2(-8.0, -11.0),
+                pause_center + vec2(-8.0, 11.0),
+                2.2
+            ),
+            line_mask(
+                gl_FragCoord.xy,
+                pause_center + vec2(8.0, -11.0),
+                pause_center + vec2(8.0, 11.0),
+                2.2
+            )
         );
     } else {
         vec2 left = pause_center + vec2(-8.0, -12.0);
@@ -154,8 +230,25 @@ void main() {
             line_mask(gl_FragCoord.xy, top, bottom, 2.2)
         );
     }
-    mark = max(mark, line_mask(gl_FragCoord.xy, clear_center + vec2(-10.0, -10.0), clear_center + vec2(10.0, 10.0), 2.2));
-    mark = max(mark, line_mask(gl_FragCoord.xy, clear_center + vec2(-10.0, 10.0), clear_center + vec2(10.0, -10.0), 2.2));
+
+    mark = max(
+        mark,
+        line_mask(
+            gl_FragCoord.xy,
+            clear_center + vec2(-10.0, -10.0),
+            clear_center + vec2(10.0, 10.0),
+            2.2
+        )
+    );
+    mark = max(
+        mark,
+        line_mask(
+            gl_FragCoord.xy,
+            clear_center + vec2(-10.0, 10.0),
+            clear_center + vec2(10.0, -10.0),
+            2.2
+        )
+    );
     color = mix(color, vec3(0.98), mark);
 
     frag_color = vec4(color, 1.0);
