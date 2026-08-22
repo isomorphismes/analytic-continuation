@@ -78,15 +78,41 @@ float positive_fract(float value) {
     return value - floor(value);
 }
 
-vec3 hue_rgb(float hue) {
-    vec3 wave = abs(mod(hue * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0;
-    return clamp(wave, 0.0, 1.0);
+float srgb_component(float linear_value) {
+    float value = max(linear_value, 0.0);
+    if (value <= 0.0031308) {
+        return 12.92 * value;
+    }
+    return 1.055 * pow(value, 1.0 / 2.4) - 0.055;
 }
 
-vec3 domain_color(float hue, float modulus_band) {
-    vec3 saturated = hue_rgb(hue);
-    float value = 0.72 + 0.16 * modulus_band + 0.04 * positive_fract(hue * 3.6);
-    return value * mix(vec3(1.0), saturated, 0.68);
+vec3 hcl_to_srgb(float hue_degrees, float chroma, float lightness) {
+    float hue = radians(hue_degrees);
+    float u_star = chroma * cos(hue);
+    float v_star = chroma * sin(hue);
+
+    const float white_u_prime = 0.19783982482140777;
+    const float white_v_prime = 0.46833630293240974;
+
+    float y = lightness > 8.0
+        ? pow((lightness + 16.0) / 116.0, 3.0)
+        : lightness / 903.2962962962963;
+
+    float u_prime = u_star / (13.0 * lightness) + white_u_prime;
+    float v_prime = v_star / (13.0 * lightness) + white_v_prime;
+
+    float x = (9.0 * y * u_prime) / (4.0 * v_prime);
+    float z = y * (12.0 - 3.0 * u_prime - 20.0 * v_prime) / (4.0 * v_prime);
+
+    float linear_r =  3.2404542 * x - 1.5371385 * y - 0.4985314 * z;
+    float linear_g = -0.9692660 * x + 1.8760108 * y + 0.0415560 * z;
+    float linear_b =  0.0556434 * x - 0.2040259 * y + 1.0572252 * z;
+
+    return clamp(vec3(
+        srgb_component(linear_r),
+        srgb_component(linear_g),
+        srgb_component(linear_b)
+    ), 0.0, 1.0);
 }
 
 float circle_mask(vec2 point, vec2 center, float radius) {
@@ -109,6 +135,8 @@ void main() {
     vec2 w = inverse_lasso(z);
     float w_radius = length(w);
 
+    // Preserve the original domain-coloring phase and modulus while doing the
+    // Blaschke accumulation with one atan() and one log() after the loop.
     vec2 phase_product = vec2(1.0, 0.0);
     float modulus_product = 1.0;
 
@@ -133,9 +161,12 @@ void main() {
 
     float phase = atan(phase_product.y, phase_product.x) + u_phase;
     float log_modulus = log(max(modulus_product, 1.0e-12));
-    float hue = positive_fract(phase / TAU);
+    float hue_degrees = 360.0 * positive_fract(phase / TAU);
     float log_modulus_band = positive_fract(log_modulus / LOG_10);
-    vec3 color = domain_color(hue, log_modulus_band);
+    float lightness = 66.0
+        + 4.0 * log_modulus_band
+        + 3.0 * positive_fract(hue_degrees / 100.0);
+    vec3 color = hcl_to_srgb(hue_degrees, 45.0, lightness);
 
     vec2 unit_w = w_radius > 1.0e-6 ? w / w_radius : vec2(1.0, 0.0);
     vec2 boundary_derivative;
