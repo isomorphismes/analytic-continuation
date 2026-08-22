@@ -64,7 +64,7 @@ jobs:
           name: analytic-continuation-lasso-apk
           path: artifacts
 
-      - name: Launch, deform the lasso, add a zero, and pause the phase walk
+      - name: Launch, deform, add a zero, pause, and close
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -111,6 +111,12 @@ jobs:
             grep -Fq 'lasso phase walk paused' lasso-emulator.log
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable' lasso-emulator.log
             adb exec-out screencap -p > lasso-emulator.png
+
+            CLOSE_X="$((WIDTH - 52))"
+            adb shell input tap "$CLOSE_X" 52
+            sleep 1
+            adb logcat -d > lasso-emulator.log
+            grep -Fq 'lasso close requested' lasso-emulator.log
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
