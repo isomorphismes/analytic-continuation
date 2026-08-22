@@ -7,6 +7,12 @@ on:
     paths:
       - 'android/**'
       - '.github/workflows/lasso-ui-regression.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android/**'
+      - '.github/workflows/lasso-ui-regression.yml'
   workflow_dispatch:
 
 permissions:
