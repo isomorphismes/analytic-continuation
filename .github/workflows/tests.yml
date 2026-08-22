@@ -16,3 +16,4 @@ jobs:
       - run: python -m pip install -e .
       - run: python -m unittest discover -s tests -v
       - run: cc -std=c11 -Wall -Wextra -Wpedantic tests/test_completion_state.c -lm -o /tmp/test_completion_state && /tmp/test_completion_state
+      - run: cc -std=c11 -Wall -Wextra -Wpedantic tests/test_zero_one_symbol.c -lm -o /tmp/test_zero_one_symbol && /tmp/test_zero_one_symbol
