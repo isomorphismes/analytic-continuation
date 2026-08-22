@@ -70,7 +70,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Launch, deform, add a zero, pause, and close
+      - name: Launch, deform, add a zero, pause, and exit
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -108,10 +108,10 @@ jobs:
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable' lasso-emulator.log
             adb exec-out screencap -p > lasso-emulator.png
 
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; adb shell input tap "$((width - 58))" 58
+            adb shell input keyevent 4
             sleep 1
             adb logcat -d > lasso-emulator.log
-            grep -Fq 'lasso close requested' lasso-emulator.log
+            grep -Fq 'lasso back requested' lasso-emulator.log
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
