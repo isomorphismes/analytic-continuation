@@ -1,0 +1,83 @@
+name: Current analytic completion emulator smoke
+
+on:
+  push:
+    branches:
+      - underdetermined-vibrating-domain
+
+permissions:
+  contents: read
+
+jobs:
+  emulator-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install native Android toolchain
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Build current native APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Enable KVM permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Exercise dot-line UI at software-renderer resolution
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: medium_phone
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
+          script: |
+            set -euxo pipefail
+            adb shell wm size 480x800
+            adb shell wm density 240
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb logcat -c
+            adb shell am start -W -n org.isomorphisms.analyticcontinuation/.ExplorerActivity
+            sleep 2
+            adb logcat -d -t 3000 > analytic-continuation-emulator.log
+            adb shell pidof -s org.isomorphisms.analyticcontinuation | tr -d '\r' | grep -Eq '^[0-9]+$'
+            grep -Fq 'vibrating analytic completion dot-line renderer ready' analytic-continuation-emulator.log
+            width="$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print dimensions[1] }' analytic-continuation-emulator.log)"
+            height="$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print dimensions[2] }' analytic-continuation-emulator.log)"
+            test "$width" -gt 0
+            test "$height" -gt 0
+            adb shell input swipe "$((width * 35 / 100))" "$((height * 55 / 100))" "$((width * 65 / 100))" "$((height * 55 / 100))" 400
+            sleep 1
+            adb logcat -d -t 3000 > analytic-continuation-emulator.log
+            grep -Fq 'completion zero-one symbol added:' analytic-continuation-emulator.log
+            grep -Fq '; 2 constraints; motion scale' analytic-continuation-emulator.log
+            adb shell input tap "$((width / 2))" "$((height * 35 / 100))"
+            sleep 1
+            adb logcat -d -t 3000 > analytic-continuation-emulator.log
+            adb exec-out screencap -p > analytic-continuation-emulator.png
+            grep -Fq 'completion point 3 locked' analytic-continuation-emulator.log
+            grep -Fq '; motion scale' analytic-continuation-emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|dot-line renderer unavailable' analytic-continuation-emulator.log
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: analytic-completion-emulator-smoke
+          path: |
+            analytic-continuation-emulator.log
+            analytic-continuation-emulator.png
+          if-no-files-found: warn
