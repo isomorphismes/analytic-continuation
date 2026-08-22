@@ -1,7 +1,8 @@
 # Analytic continuation
 
-Make a short movie in which a complex grid opens from the input plane into the
-map `z → f(z)`, pauses, and closes again.
+Explore radii of convergence live on Android, or render a short movie in which
+a complex grid opens from the input plane into the map `z → f(z)`, pauses, and
+closes again.
 
 The renderer uses [ManimGL](https://github.com/3b1b/manim), the version of
 Manim maintained by 3Blue1Brown.  The 2016 zeta video source is
@@ -59,8 +60,8 @@ analytic-continuation validate examples/rational_disc_reveal.json
 ```
 
 Use `--preview` on the render command for ManimGL's interactive window.  The
-examples include zeta, Airy Ai, Bessel J order zero, and the current Wegert
-factorization `(z - 1)(z - 2)(z - 5)`.
+examples include zeta, Airy Ai, Bessel J order zero, and rational maps exported
+from Wegert.
 
 Run the small non-rendering test suite with:
 
@@ -68,11 +69,31 @@ Run the small non-rendering test suite with:
 python -m unittest discover -s tests -v
 ```
 
-## Android movie viewer
+## Android viewer and live explorer
 
-The Android module is deliberately a viewer for MP4 files rendered by ManimGL
-in CI; it does not pretend that the Python renderer runs on the phone. The Play
-bundle workflow renders the named samples and packages them for offline viewing.
+The Android home screen keeps the offline MP4 viewer. Its **Explore convergence
+discs live** action opens a native C `NativeActivity` using Wegert's proven
+EGL/OpenGL ES 3 renderer and touch loop; ManimGL and Python do not run on the
+phone.
+
+The live model is the normalized rational function
+
+```text
+g(z) = product(z - zero) / product(z - infinity-point).
+```
+
+The initial non-polynomial example is `g(z) = (z + 1) / (z - 1)`. Tap ○ or ∞
+and then the portrait to edit its factors. Exact opposite factors cancel
+one-for-one. In convergence-disc view, the radius at each center is the
+distance to the nearest uncancelled finite point mapped to ∞, and a new center
+must lie strictly inside the preceding open disc. Revealed discs show the live
+phase portrait; everything else is a function-independent charcoal weave, so
+hidden values do not leak through the background.
+
+This first explorer visualizes valid convergence-disc geometry while evaluating
+the selected rational function directly. It does not yet propagate Taylor
+coefficients or track branches. The Play workflow builds an installable debug
+APK for validation and a signed AAB while preserving the movie-rendering path.
 See [`docs/google-play-release.md`](docs/google-play-release.md).
 
 ## Movie JSON
