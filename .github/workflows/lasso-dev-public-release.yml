@@ -1,3 +1,4 @@
+# Public Lasso Dev release publisher; changes to this file intentionally retrigger publication.
 name: Publish Lasso Dev Public Release
 
 on:
