@@ -25,7 +25,7 @@ struct perturbation_slot {
     struct perturbation_descriptor descriptor;
     float initial_phase_amplitude;
     float decay_seconds;
-    double born_seconds;
+    uint64_t born_nanoseconds;
     bool ready;
     bool request_new;
 };
@@ -52,10 +52,11 @@ struct perturbation_system {
     bool coordinator_started;
 };
 
-static double monotonic_seconds(void) {
+static uint64_t monotonic_nanoseconds(void) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
-    return (double)now.tv_sec + (double)now.tv_nsec * 1.0e-9;
+    return (uint64_t)now.tv_sec * UINT64_C(1000000000)
+        + (uint64_t)now.tv_nsec;
 }
 
 static uint32_t xorshift32(uint32_t *state) {
@@ -164,7 +165,7 @@ static void *worker_main(void *argument) {
             slot->descriptor = descriptor;
             slot->initial_phase_amplitude = initial_phase;
             slot->decay_seconds = decay_seconds;
-            slot->born_seconds = monotonic_seconds();
+            slot->born_nanoseconds = monotonic_nanoseconds();
             slot->ready = true;
         }
         pthread_mutex_unlock(&system->mutex);
@@ -173,7 +174,7 @@ static void *worker_main(void *argument) {
 
 static void publish_snapshot_locked(
     struct perturbation_system *system,
-    double now_seconds
+    uint64_t now_nanoseconds
 ) {
     struct perturbation_snapshot snapshot;
     memset(&snapshot, 0, sizeof(snapshot));
@@ -187,9 +188,12 @@ static void publish_snapshot_locked(
             continue;
         }
 
-        float age = (float)fmax(now_seconds - slot->born_seconds, 0.0);
+        uint64_t age_nanoseconds = now_nanoseconds >= slot->born_nanoseconds
+            ? now_nanoseconds - slot->born_nanoseconds
+            : UINT64_C(0);
+        float age_seconds = (float)age_nanoseconds * 1.0e-9f;
         float phase = slot->initial_phase_amplitude
-            * expf(-age / fmaxf(slot->decay_seconds, 1.0e-3f));
+            * expf(-age_seconds / fmaxf(slot->decay_seconds, 1.0e-3f));
         if (fabsf(phase) < PERTURBATION_RECYCLE_PHASE) {
             slot->ready = false;
             slot->request_new = true;
@@ -218,7 +222,7 @@ static void *coordinator_main(void *argument) {
             return NULL;
         }
 
-        publish_snapshot_locked(system, monotonic_seconds());
+        publish_snapshot_locked(system, monotonic_nanoseconds());
         pthread_cond_broadcast(&system->condition);
         pthread_mutex_unlock(&system->mutex);
         nanosleep(&sleep_time, NULL);
@@ -252,7 +256,8 @@ bool perturbation_system_start(struct perturbation_system **system_out) {
     system->view.half_height = 3.5f;
     system->view.aspect = 1.0f;
 
-    uint32_t seed = (uint32_t)(monotonic_seconds() * 1000000.0);
+    uint64_t seed_time = monotonic_nanoseconds();
+    uint32_t seed = (uint32_t)(seed_time ^ (seed_time >> 32));
     seed ^= (uint32_t)(uintptr_t)system;
 
     for (int index = 0; index < PERTURBATION_WORKER_COUNT; ++index) {
