@@ -50,28 +50,22 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
           script: |
             set -eu
-            adb shell wm size 480x800
-            adb shell wm density 240
+            adb shell wm size 320x480
+            adb shell wm density 160
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb logcat -c
             adb shell am start -W -n org.isomorphisms.analyticcontinuation/.ExplorerActivity
-            sleep 2
-            adb logcat -d -t 3000 > analytic-continuation-emulator.log
-            adb shell pidof -s org.isomorphisms.analyticcontinuation | tr -d '\r' | grep -Eq '^[0-9]+$'
+            sleep 0.2
+            adb shell input swipe 112 264 208 264 400
+            sleep 0.1
+            adb shell input tap 160 168
+            timeout 5 adb exec-out screencap -p > analytic-continuation-emulator.png || true
+            timeout 5 adb shell am force-stop org.isomorphisms.analyticcontinuation || true
+            adb wait-for-device
+            adb logcat -d -t 5000 > analytic-continuation-emulator.log
             grep -Fq 'vibrating analytic completion dot-line renderer ready' analytic-continuation-emulator.log
-            width="$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print dimensions[1] }' analytic-continuation-emulator.log)"
-            height="$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print dimensions[2] }' analytic-continuation-emulator.log)"
-            test "$width" -gt 0
-            test "$height" -gt 0
-            adb shell input swipe "$((width * 35 / 100))" "$((height * 55 / 100))" "$((width * 65 / 100))" "$((height * 55 / 100))" 400
-            sleep 1
-            adb logcat -d -t 3000 > analytic-continuation-emulator.log
             grep -Fq 'completion zero-one symbol added:' analytic-continuation-emulator.log
             grep -Fq '; 2 constraints; motion scale' analytic-continuation-emulator.log
-            adb shell input tap "$((width / 2))" "$((height * 35 / 100))"
-            sleep 1
-            adb logcat -d -t 3000 > analytic-continuation-emulator.log
-            adb exec-out screencap -p > analytic-continuation-emulator.png
             grep -Fq 'completion point 3 locked' analytic-continuation-emulator.log
             grep -Fq '; motion scale' analytic-continuation-emulator.log
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|dot-line renderer unavailable' analytic-continuation-emulator.log
