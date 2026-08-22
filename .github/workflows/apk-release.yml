@@ -149,18 +149,11 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
           script: |
-            set -eu
-            apk="artifacts/analytic-continuation-${RELEASE_VERSION}.apk"
-            adb install -r "$apk"
+            adb install -r "artifacts/analytic-continuation-${RELEASE_VERSION}.apk"
             adb logcat -c
-            adb shell am start -W \
-              -a android.intent.action.MAIN \
-              -c android.intent.category.LAUNCHER \
-              -n org.isomorphisms.analyticcontinuation/.MainActivity
+            adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n org.isomorphisms.analyticcontinuation/.MainActivity
             sleep 3
-            adb shell pidof -s org.isomorphisms.analyticcontinuation \
-              | tr -d '\r' \
-              | grep -Eq '^[0-9]+$'
+            adb shell pidof -s org.isomorphisms.analyticcontinuation | tr -d '\r' | grep -Eq '^[0-9]+$'
             adb shell uiautomator dump /sdcard/analytic-continuation.xml
             adb pull /sdcard/analytic-continuation.xml .
             grep -Fq 'Analytic Continuation' analytic-continuation.xml
