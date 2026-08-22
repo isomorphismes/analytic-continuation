@@ -11,7 +11,7 @@ on:
     branches:
       - main
     paths:
-      - 'release-triggers/lasso-dev-v0.1.0.txt'
+      - 'release-triggers/lasso-dev-v0.1.1.txt'
   workflow_dispatch:
 
 permissions:
@@ -41,6 +41,15 @@ jobs:
       - name: Install native Android toolchain
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
+      - name: Verify original HCL palette is retained
+        run: |
+          set -euo pipefail
+          SHADER=android/app/src/main/assets/continuation.frag
+          grep -Fq 'vec3 hcl_to_srgb' "$SHADER"
+          grep -Fq 'vec3 color = hcl_to_srgb(hue_degrees, 45.0, lightness);' "$SHADER"
+          grep -Fq 'float lightness = 66.0' "$SHADER"
+          ! grep -Fq 'vec3 hue_rgb' "$SHADER"
+
       - name: Build Lasso Dev APK
         working-directory: android
         run: ./gradlew --no-daemon :app:assembleDebug
@@ -53,7 +62,8 @@ jobs:
           AAPT2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
           grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' /tmp/apksigner.txt
-          "$AAPT2" dump badging "$APK" | grep -Fq "package: name='org.isomorphisms.analyticcontinuation.lasso.dev'"
+          "$AAPT2" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='org.isomorphisms.analyticcontinuation.lasso.dev' versionCode='2' versionName='0.1.1-lasso-dev'" /tmp/badging.txt
           unzip -l "$APK" | grep -Eq 'res/(mipmap|drawable).*(ic_launcher|ic_lasso)'
 
       - name: Prepare release assets
@@ -68,14 +78,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG=lasso-dev-v0.1.0
+          TAG=lasso-dev-v0.1.1
           LASSO_SHA=$(git rev-parse HEAD)
-          RELEASE_TITLE='Lasso Dev v0.1.0'
-          RELEASE_NOTES="Public sideload build of the analytic-continuation lasso experiment from lasso commit ${LASSO_SHA}.
+          RELEASE_TITLE='Lasso Dev v0.1.1'
+          RELEASE_NOTES="Color-corrected public sideload build of the analytic-continuation lasso experiment from lasso commit ${LASSO_SHA}.
 
-          Package: org.isomorphisms.analyticcontinuation.lasso.dev
+          Restores the original CIELUV/HCL domain-coloring palette while retaining the cheaper Blaschke phase/modulus accumulation. Package: org.isomorphisms.analyticcontinuation.lasso.dev. Android version code: 2.
 
-          This APK uses the repository's permanent non-production sideload signing key so later Lasso Dev APKs can update it in place. It is separate from the production/Play signing channel."
+          This APK uses the same permanent non-production sideload signing key as Lasso Dev v0.1.0, so it updates that installation in place."
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
@@ -96,7 +106,7 @@ jobs:
           jq -e --arg expected "$LASSO_SHA" '
             .isDraft == false and
             .isPrerelease == false and
-            .tagName == "lasso-dev-v0.1.0" and
+            .tagName == "lasso-dev-v0.1.1" and
             .targetCommitish == $expected and
             ([.assets[].name] | index("analytic-continuation-lasso-dev.apk") != null) and
             ([.assets[].name] | index("analytic-continuation-lasso-dev.apk.sha256") != null)
