@@ -90,23 +90,13 @@ jobs:
             grep -Fq 'outside=domain-coloring' lasso-emulator.log
             grep -Fq 'lasso first frame:' lasso-emulator.log
 
-            WIDTH="$(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1/p' lasso-emulator.log | tail -1)"
-            HEIGHT="$(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\2/p' lasso-emulator.log | tail -1)"
-            MIN_SIDE="$WIDTH"
-            if [ "$HEIGHT" -lt "$WIDTH" ]; then MIN_SIDE="$HEIGHT"; fi
-            RADIUS="$(awk -v side="$MIN_SIDE" 'BEGIN { print int(0.42 * side) }')"
-            CENTER_X="$((WIDTH / 2))"
-            CENTER_Y="$((HEIGHT / 2))"
-            START_Y="$((CENTER_Y - RADIUS))"
-            END_Y="$((START_Y - 70))"
-
-            adb shell input swipe "$CENTER_X" "$START_Y" "$CENTER_X" "$END_Y" 500
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; radius=$((42 * min_side / 100)); center_x=$((width / 2)); center_y=$((height / 2)); start_y=$((center_y - radius)); end_y=$((start_y - 70)); adb shell input swipe "$center_x" "$start_y" "$center_x" "$end_y" 500
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'lasso deformed:' lasso-emulator.log
             grep -Fq 'lasso drag finished:' lasso-emulator.log
 
-            adb shell input tap "$CENTER_X" "$CENTER_Y"
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; adb shell input tap "$((width / 2))" "$((height / 2))"
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'zero added:' lasso-emulator.log
@@ -118,8 +108,7 @@ jobs:
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable' lasso-emulator.log
             adb exec-out screencap -p > lasso-emulator.png
 
-            CLOSE_X="$((WIDTH - 52))"
-            adb shell input tap "$CLOSE_X" 52
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; adb shell input tap "$((width - 52))" 52
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'lasso close requested' lasso-emulator.log
