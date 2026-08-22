@@ -8,7 +8,9 @@ static float deformation_velocity[LASSO_COEFFICIENT_COUNT][2];
 static double deformation_last_time = 0.0;
 static double deformation_last_publish = 0.0;
 static double deformation_last_log = 0.0;
+static uint64_t deformation_accepted_steps = 0;
 static bool deformation_workers_started = false;
+static bool deformation_direction_ready = false;
 
 static void initialize_random_rational(struct engine *engine) {
     initialize_lasso(engine);
@@ -32,16 +34,51 @@ static void initialize_random_rational(struct engine *engine) {
     deformation_last_time = monotonic_seconds();
     deformation_last_publish = 0.0;
     deformation_last_log = 0.0;
+    deformation_accepted_steps = 0;
+    deformation_direction_ready = false;
+}
+
+static bool zero_control_contains(const struct engine *engine, float x, float y) {
+    float radius = placement_radius(engine);
+    float center_x = radius + 16.0f;
+    float center_y = (float)engine->height - radius - 16.0f;
+    return hypotf(x - center_x, y - center_y) <= radius;
+}
+
+static void toggle_holomorphic_pause(struct engine *engine) {
+    engine->paused = !engine->paused;
+    deformation_last_time = monotonic_seconds();
+    engine->last_animation_time = deformation_last_time;
+    engine->dirty = true;
+    LOGI("holomorphic walk %s", engine->paused ? "paused" : "running");
 }
 
 static void publish_deformation_snapshot(struct engine *engine, double now) {
     if (!deformation_workers_started) {
         return;
     }
-    if (deformation_last_publish == 0.0 || now - deformation_last_publish >= 0.080) {
+    if (deformation_last_publish == 0.0 || now - deformation_last_publish >= 0.200) {
         holomorphic_walk_publish(engine->lasso_coefficients);
         deformation_last_publish = now;
     }
+}
+
+static void log_holomorphic_state(struct engine *engine, double now, float score) {
+    if (now - deformation_last_log < 2.0) {
+        return;
+    }
+    LOGI(
+        "holomorphic walk: workers=%d steps=%llu budget=%.4f a2=%.5g%+.5gi score=%.6g zeros=%d poles=%d",
+        HOLOMORPHIC_WALK_WORKER_COUNT,
+        (unsigned long long)deformation_accepted_steps,
+        lasso_derivative_budget(engine->lasso_coefficients),
+        engine->lasso_coefficients[0][0],
+        engine->lasso_coefficients[0][1],
+        score,
+        engine->zero_count,
+        engine->pole_count
+    );
+    deformation_last_log = now;
 }
 
 static void advance_holomorphic_function(struct engine *engine) {
@@ -63,8 +100,8 @@ static void advance_holomorphic_function(struct engine *engine) {
         return;
     }
 
-    float direction[LASSO_COEFFICIENT_COUNT][2];
     float score = 0.0f;
+    float direction[LASSO_COEFFICIENT_COUNT][2];
     if (deformation_workers_started && holomorphic_walk_best_direction(direction, &score)) {
         float blend = 1.0f - expf(-3.2f * dt);
         const float speed = 0.105f;
@@ -76,6 +113,12 @@ static void advance_holomorphic_function(struct engine *engine) {
                 (1.0f - blend) * deformation_velocity[index][1] +
                 blend * speed * direction[index][1];
         }
+        deformation_direction_ready = true;
+    }
+
+    if (!deformation_direction_ready) {
+        log_holomorphic_state(engine, now, score);
+        return;
     }
 
     float candidate[LASSO_COEFFICIENT_COUNT][2];
@@ -92,6 +135,7 @@ static void advance_holomorphic_function(struct engine *engine) {
         memcpy(engine->lasso_coefficients, candidate, sizeof(candidate));
         memcpy(engine->zero_preimages, zero_preimages, sizeof(zero_preimages));
         memcpy(engine->pole_preimages, pole_preimages, sizeof(pole_preimages));
+        deformation_accepted_steps += 1;
         engine->dirty = true;
     } else {
         for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
@@ -104,17 +148,7 @@ static void advance_holomorphic_function(struct engine *engine) {
         }
     }
 
-    if (now - deformation_last_log >= 2.0) {
-        LOGI(
-            "holomorphic walk: workers=%d budget=%.4f score=%.6g zeros=%d poles=%d",
-            HOLOMORPHIC_WALK_WORKER_COUNT,
-            lasso_derivative_budget(engine->lasso_coefficients),
-            score,
-            engine->zero_count,
-            engine->pole_count
-        );
-        deformation_last_log = now;
-    }
+    log_holomorphic_state(engine, now, score);
 }
 
 static int32_t handle_zero_only_input(struct android_app *app, AInputEvent *event) {
@@ -134,9 +168,16 @@ static int32_t handle_zero_only_input(struct android_app *app, AInputEvent *even
             engine->suppress_tap = false;
 
             if (pause_control_contains(engine, x, y)) {
-                toggle_pause(engine);
+                toggle_holomorphic_pause(engine);
                 clear_gesture(engine);
                 engine->suppress_tap = true;
+                return 1;
+            }
+
+            if (zero_control_contains(engine, x, y)) {
+                clear_gesture(engine);
+                engine->suppress_tap = true;
+                LOGI("zero placement active");
                 return 1;
             }
 
