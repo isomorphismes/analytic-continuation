@@ -4,6 +4,7 @@ precision highp int;
 
 #define MAX_FACTORS 64
 #define MAX_CONTINUATION_STEPS 24
+#define MAX_PERTURBATIONS 3
 
 in vec2 v_ndc;
 out vec4 frag_color;
@@ -20,12 +21,25 @@ uniform int u_view_kind;
 uniform int u_continuation_count;
 uniform vec2 u_continuation_centers[MAX_CONTINUATION_STEPS];
 uniform float u_continuation_radii[MAX_CONTINUATION_STEPS];
+uniform int u_perturbation_count;
+uniform vec2 u_perturbation_disk_centers[MAX_PERTURBATIONS];
+uniform float u_perturbation_inverse_radii[MAX_PERTURBATIONS];
+uniform vec2 u_perturbation_anchors[MAX_PERTURBATIONS];
+uniform float u_perturbation_kernel_scales[MAX_PERTURBATIONS];
+uniform float u_perturbation_phase_amplitudes[MAX_PERTURBATIONS];
 
 const float TAU = 6.28318530717958647692;
 const float LOG_10 = 2.30258509299404568402;
 
 float positive_fract(float value) {
     return value - floor(value);
+}
+
+vec2 complex_multiply(vec2 left, vec2 right) {
+    return vec2(
+        left.x * right.x - left.y * right.y,
+        left.x * right.y + left.y * right.x
+    );
 }
 
 float srgb_component(float linear_value) {
@@ -101,6 +115,38 @@ void main() {
         vec2 delta = z - u_poles[index];
         phase -= atan(delta.y, delta.x);
         log_modulus -= log(max(length(delta), 1.0e-12));
+    }
+
+    // Each ARM worker supplies one normalized Bergman-kernel perturbation.
+    // If phi_a(a) = 1 and eta = i*alpha, then
+    //     f_new = f * exp(eta * phi_a)
+    // is holomorphic on the worker's containing disk and rotates the chosen
+    // point by alpha without changing its modulus there.  Domain coloring only
+    // needs Re(eta*phi_a) and Im(eta*phi_a), so no complex exponential is
+    // evaluated per pixel.
+    for (int index = 0; index < MAX_PERTURBATIONS; ++index) {
+        if (index >= u_perturbation_count) {
+            break;
+        }
+
+        vec2 normalized_z = (z - u_perturbation_disk_centers[index])
+            * u_perturbation_inverse_radii[index];
+        vec2 anchor = u_perturbation_anchors[index];
+
+        // denominator = 1 - conj(anchor) * normalized_z
+        vec2 denominator = vec2(
+            1.0 - dot(anchor, normalized_z),
+            normalized_z.x * anchor.y - normalized_z.y * anchor.x
+        );
+        float denominator_squared = max(dot(denominator, denominator), 1.0e-12);
+        vec2 inverse_denominator = vec2(denominator.x, -denominator.y)
+            / denominator_squared;
+        vec2 kernel = complex_multiply(inverse_denominator, inverse_denominator)
+            * u_perturbation_kernel_scales[index];
+
+        float alpha = u_perturbation_phase_amplitudes[index];
+        log_modulus -= alpha * kernel.y;
+        phase += alpha * kernel.x;
     }
 
     float hue_degrees = 360.0 * positive_fract(phase / TAU);
