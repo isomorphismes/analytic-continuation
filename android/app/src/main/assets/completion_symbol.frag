@@ -2,8 +2,9 @@
 precision highp float;
 precision highp int;
 
-#define MAX_COMPLETION_COEFFICIENTS 8
-#define MAX_VALUE_CONSTRAINTS 8
+#define MAX_ANALYTIC_MODES 4
+#define MAX_VALUE_CONSTRAINTS 12
+#define MAX_ANCHOR_COEFFICIENTS 13
 
 in vec2 v_ndc;
 out vec4 frag_color;
@@ -12,7 +13,9 @@ uniform vec2 u_center;
 uniform float u_half_height;
 uniform float u_aspect;
 uniform vec2 u_resolution;
-uniform vec2 u_completion_coefficients[MAX_COMPLETION_COEFFICIENTS];
+uniform vec2 u_mode_frequencies[MAX_ANALYTIC_MODES];
+uniform vec2 u_anchor_polynomials[MAX_ANALYTIC_MODES * MAX_ANCHOR_COEFFICIENTS];
+uniform vec2 u_wander[MAX_ANALYTIC_MODES];
 uniform int u_constraint_count;
 uniform vec2 u_constraint_domains[MAX_VALUE_CONSTRAINTS];
 uniform vec2 u_constraint_values[MAX_VALUE_CONSTRAINTS];
@@ -30,12 +33,50 @@ vec2 complex_multiply(vec2 left, vec2 right) {
     );
 }
 
-vec2 evaluate_completion(vec2 z) {
+vec2 complex_exp(vec2 value) {
+    float modulus = exp(value.x);
+    return modulus * vec2(cos(value.y), sin(value.y));
+}
+
+vec2 evaluate_mode_polynomial(int mode, vec2 z) {
     vec2 value = vec2(0.0);
-    for (int index = MAX_COMPLETION_COEFFICIENTS - 1; index >= 0; --index) {
-        value = complex_multiply(value, z) + u_completion_coefficients[index];
+    int offset = mode * MAX_ANCHOR_COEFFICIENTS;
+    for (int coefficient = MAX_ANCHOR_COEFFICIENTS - 1;
+         coefficient >= 0;
+         --coefficient) {
+        value = complex_multiply(value, z)
+            + u_anchor_polynomials[offset + coefficient];
     }
     return value;
+}
+
+vec2 evaluate_completion(vec2 z) {
+    vec2 anchor = vec2(0.0);
+    vec2 wander_sum = vec2(0.0);
+
+    for (int mode = 0; mode < MAX_ANALYTIC_MODES; ++mode) {
+        vec2 exponential = complex_exp(
+            complex_multiply(u_mode_frequencies[mode], z)
+        );
+        anchor += complex_multiply(
+            evaluate_mode_polynomial(mode, z),
+            exponential
+        );
+        wander_sum += complex_multiply(u_wander[mode], exponential);
+    }
+
+    vec2 vanishing = vec2(1.0, 0.0);
+    for (int index = 0; index < MAX_VALUE_CONSTRAINTS; ++index) {
+        if (index >= u_constraint_count) {
+            break;
+        }
+        vanishing = complex_multiply(
+            vanishing,
+            z - u_constraint_domains[index]
+        );
+    }
+
+    return anchor + complex_multiply(vanishing, wander_sum);
 }
 
 float positive_fract(float value) {
