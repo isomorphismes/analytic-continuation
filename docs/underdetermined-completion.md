@@ -3,89 +3,90 @@
 This branch explores a visual rule for a complex function that the user has not
 yet specified completely.
 
-## Finite exploration family
+## Analytic exploration family
 
-An arbitrary analytic function is still infinitely underdetermined after any
-finite list of point values.  The interactive renderer therefore needs an
-explicit finite exploration family.  The first prototype uses complex
-polynomials of degree at most seven: eight complex coefficients.
+A finite list of point values does not determine an arbitrary analytic
+function.  The vibrating completion therefore no longer pretends that eight
+point constraints exhaust eight polynomial coefficients.
 
-If the user has fixed
+The renderer now writes the displayed function as
 
-    f(z_0) = w_0, ..., f(z_(m-1)) = w_(m-1),
+    f(z) = A(z) + V(z) W(z)
 
-write every still-allowed polynomial as
+with
 
-    f(z) = I(z) + V(z) q(z)
+    V(z) = product(z - z_i)
 
-where `I` is the degree-`m-1` interpolating polynomial and
+for every constrained domain point `z_i`.
 
-    V(z) = product(z - z_i).
+`A` is the anchored analytic function already accepted by the user.  `W` is a
+small, damped random sum of complex exponentials
 
-`V` is zero at every fixed domain point, so changing `q` can never disturb a
-value the user has already supplied.  With maximum degree seven, `q` has
-`8 - m` complex coefficients.  Every independent point removes one complex
-degree of freedom.  At eight points the family is completely determined.
+    W(z) = sum a_k exp(lambda_k z).
 
-## Interaction rule
+The nonzero `lambda_k` are seeded once per experiment.  Even a finite sum of
+these modes is an entire, generally non-polynomial function.  More importantly,
+adding a point constraint does not consume one of the exponential modes: every
+mode remains available, multiplied by the new vanishing factor.
 
-A tap means "lock what I see here":
+The finite mode count and the twelve stored point constraints are implementation
+budgets for a phone renderer, not mathematical dimensions of the analytic
+family.
 
-1. Evaluate the currently displayed completion at the tapped domain point.
-2. Add that `(domain, value)` pair as a constraint.
-3. Re-express the *same current polynomial* in the smaller affine family.
-4. Continue the random walk only in the remaining free coefficients.
+## Exact constraints and no-jump locking
 
-Step 3 matters visually: adding a point must not make the picture jump.  It
-changes which future motions are legal, not the function shown on the locking
-frame.
+Because `V(z_i) = 0`, every future perturbation `V W` vanishes exactly at every
+locked point.  The dot/line gesture therefore still means
 
-A one-finger drag creates the zero/one symbol directly.  The finger-down point
-is constrained to lie in `f^-1(0)` and is drawn as the dot.  The release point
-is constrained to lie in `f^-1(1)` and is the plain terminus of the line from
-the dot.  The symbol is previewed while the finger moves, then remains over the
-domain coloring after both exact constraints are accepted.  A zero/one symbol
-therefore removes two complex degrees of freedom.
+    dot domain:       f(z) = 0
+    line terminus:    f(z) = 1
 
-Single-finger drag is reserved for creating this symbol.  Two-finger pinch
-continues to pan and zoom the camera, and the existing three-finger gesture
-resets the experiment.
+and those values remain fixed while the rest of the portrait moves.
 
-Ordinary locked values remain ring markers.  The zero and one endpoints do not:
-the dot-and-line glyph replaces those circles so the picture states the actual
-constraint geometrically.
+A tap means "lock what I see here."  Before the new point is recorded, the
+current `V W` perturbation is folded into `A`.  Algebraically this rewrites the
+same entire function; it does not merely preserve the tapped pixel.  The whole
+current frame is therefore the anchor for subsequent motion.  A requested zero
+or one value then adds a multiple of the old `V`, which preserves every older
+constraint exactly.
 
-## Motion
+A zero/one pair is accepted atomically: if either endpoint is invalid, the
+entire state rolls back.
 
-The random walker is mean-reverting and bounded in practice.  Its per-frame
-noise is multiplied by the square root of the remaining freedom fraction.
-Thus the portrait becomes quieter for two independent reasons:
+## Interaction
 
-- fewer complex coefficients are allowed to move;
-- each remaining coefficient moves less as the family approaches a unique
-  completion.
+Single tap locks the current value.  One-finger drag previews and creates the
+zero/one dot-line symbol.  Two-finger pinch pans and zooms.  Three fingers reset
+the experiment.  Ordinary locked values remain ring markers; the zero/one pair
+is represented by its dot and line instead of duplicate rings.
 
-This damping is a visual design choice, separate from the mathematical fact
-that the allowed affine space loses one complex dimension per independent
-point.
+## Damping
+
+The random exponential amplitudes follow the same mean-reverting walk as the
+prototype.  Motion is multiplied by
+
+    1 / sqrt(1 + 0.55 * number_of_constraints).
+
+Thus every added point calms the portrait, but no finite number of constraints
+is described as exhausting the analytic family.  At eight constraints the
+function still has visible legal motion away from the constrained points.
 
 ## GPU cost
 
-The fragment shader receives eight complex coefficients and evaluates the
-polynomial with Horner's rule.  That is eight complex multiply-adds per pixel.
-The dot/line overlay adds only a few point-to-segment distance calculations for
-the small fixed constraint set.
+The GLES3 shader uses four analytic modes.  For each pixel it evaluates four
+short polynomial prefactors with Horner's rule, four complex exponentials, one
+vanishing product over the stored constraints, and the existing domain-coloring
+and dot/line overlay.  All stochastic updates and constraint bookkeeping remain
+on the CPU once per frame or gesture.
 
-The existing rational domain-coloring shader can loop over as many as 64 zeros
-and 64 poles, including distances, arguments, and logarithms.  The completion
-evaluation is therefore small compared with the work the current shader already
-accepts.  The random walk and interpolation happen once per frame or once per
-gesture on the CPU, not once per pixel.
+The polynomial prefactors are bookkeeping for the anchored exponential modes:
+when current motion is frozen into `A`, multiplying an exponential by the
+current `V` only raises that mode's polynomial prefactor.  The function itself
+remains non-polynomial as long as a nonzero-frequency exponential mode is
+present.
 
-If degree seven is visually too restrictive, the same representation can move
-to a larger polynomial or another finite analytic basis.  The important
-contract is that the free basis functions vanish at every user-fixed point.
-
-The dot/line supplies two exact value constraints inside this finite family.  It
-does not, by itself, assert that two values determine an unrestricted
-holomorphic germ.
+Like every float renderer of a nonconstant entire function, extreme pan/zoom
+can eventually exceed the numerical range of `exp`.  The branch deliberately
+does not clamp the exponential argument, because such a clamp would itself
+break analyticity.  The intended interactive window stays well inside the
+float-safe range for the seeded frequencies.
