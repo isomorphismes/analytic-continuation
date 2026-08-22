@@ -94,6 +94,12 @@ jobs:
           ANDROID_UPLOAD_KEY_PASSWORD: validation-only
         run: ./gradlew --no-daemon :app:assembleDebug :app:bundleRelease
 
+      - name: Verify debug and Play application identities
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging android/app/build/outputs/apk/debug/app-debug.apk > /tmp/debug-badging.txt
+          grep -Fq "package: name='org.isomorphisms.analyticcontinuation.lasso.dev'" /tmp/debug-badging.txt
+          grep -Fq 'application-label:' /tmp/debug-badging.txt
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: analytic-continuation-native-apk
@@ -128,7 +134,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Launch and touch the GLES explorer
+      - name: Launch and touch the mainline lasso explorer
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -141,19 +147,20 @@ jobs:
           script: |
             adb install -r artifacts/app-debug.apk
             adb logcat -c
-            adb shell am start -W -n org.isomorphisms.analyticcontinuation/.ExplorerActivity
+            adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
             sleep 4
             adb logcat -d > analytic-continuation-emulator.log
             adb exec-out screencap -p > analytic-continuation-emulator.png
-            adb shell pidof -s org.isomorphisms.analyticcontinuation | tr -d '\r' | grep -Eq '^[0-9]+$'
-            grep -Fq 'continuation view enabled' analytic-continuation-emulator.log
-            grep -Eq 'continuation seeded at 0([.]0+)?\+0([.]0+)?i radius=1([.]0+)?' analytic-continuation-emulator.log
-            adb shell input tap "$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print int(dimensions[1] / 2) }' analytic-continuation-emulator.log)" "$(awk '/EGL surface ready:/ { split($NF, dimensions, "x") } END { print int(dimensions[2] / 2) }' analytic-continuation-emulator.log)"
+            adb shell pidof -s org.isomorphisms.analyticcontinuation.lasso.dev | tr -d '\r' | grep -Eq '^[0-9]+$'
+            grep -Fq 'lasso ready:' analytic-continuation-emulator.log
+            grep -Fq 'zeros=1 poles=0 placement=zero' analytic-continuation-emulator.log
+            grep -Fq 'lasso first frame:' analytic-continuation-emulator.log
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' analytic-continuation-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); adb shell input tap "$((width / 2 + lasso_radius / 3))" "$((height / 2))"
             sleep 1
             adb logcat -d > analytic-continuation-emulator.log
             adb exec-out screencap -p > analytic-continuation-emulator.png
-            grep -Fq 'continuation step added' analytic-continuation-emulator.log
-            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed' analytic-continuation-emulator.log
+            grep -Fq 'zero added:' analytic-continuation-emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable|FATAL EXCEPTION' analytic-continuation-emulator.log
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

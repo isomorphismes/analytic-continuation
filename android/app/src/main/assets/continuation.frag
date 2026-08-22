@@ -2,27 +2,85 @@
 precision highp float;
 precision highp int;
 
-#define MAX_FACTORS 64
-#define MAX_CONTINUATION_STEPS 24
+#define MAX_FACTORS 32
+#define LASSO_COEFFICIENT_COUNT 5
 
 in vec2 v_ndc;
 out vec4 frag_color;
 
-uniform vec2 u_center;
-uniform float u_half_height;
-uniform float u_aspect;
 uniform vec2 u_resolution;
 uniform int u_zero_count;
 uniform int u_pole_count;
-uniform vec2 u_zeros[MAX_FACTORS];
-uniform vec2 u_poles[MAX_FACTORS];
-uniform int u_view_kind;
-uniform int u_continuation_count;
-uniform vec2 u_continuation_centers[MAX_CONTINUATION_STEPS];
-uniform float u_continuation_radii[MAX_CONTINUATION_STEPS];
+uniform vec2 u_zero_preimages[MAX_FACTORS];
+uniform vec2 u_pole_preimages[MAX_FACTORS];
+uniform vec2 u_zero_positions[MAX_FACTORS];
+uniform vec2 u_pole_positions[MAX_FACTORS];
+uniform vec2 u_lasso_coefficients[LASSO_COEFFICIENT_COUNT];
+uniform float u_phase;
+uniform int u_paused;
+uniform float u_zoom;
+uniform int u_placement_kind;
 
 const float TAU = 6.28318530717958647692;
 const float LOG_10 = 2.30258509299404568402;
+
+vec2 complex_multiply(vec2 left, vec2 right) {
+    return vec2(
+        left.x * right.x - left.y * right.y,
+        left.x * right.y + left.y * right.x
+    );
+}
+
+vec2 complex_divide(vec2 numerator, vec2 denominator) {
+    float scale = max(dot(denominator, denominator), 1.0e-10);
+    return vec2(
+        numerator.x * denominator.x + numerator.y * denominator.y,
+        numerator.y * denominator.x - numerator.x * denominator.y
+    ) / scale;
+}
+
+vec2 lasso_map_and_derivative(vec2 w, float amount, out vec2 derivative) {
+    vec2 mapped = w;
+    derivative = vec2(1.0, 0.0);
+    vec2 power = w;
+
+    for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
+        float degree = float(index + 2);
+        vec2 next_power = complex_multiply(power, w);
+        vec2 coefficient = amount * u_lasso_coefficients[index];
+        mapped += complex_multiply(coefficient, next_power);
+        derivative += degree * complex_multiply(coefficient, power);
+        power = next_power;
+    }
+    return mapped;
+}
+
+vec2 inverse_lasso(vec2 z) {
+    vec2 w = z;
+    for (int stage = 1; stage <= 4; ++stage) {
+        float amount = 0.25 * float(stage);
+        for (int iteration = 0; iteration < 2; ++iteration) {
+            vec2 derivative;
+            vec2 mapped = lasso_map_and_derivative(w, amount, derivative);
+            vec2 correction = complex_divide(mapped - z, derivative);
+            float correction_length = length(correction);
+            if (correction_length > 0.55) {
+                correction *= 0.55 / correction_length;
+            }
+            w -= correction;
+        }
+    }
+    return w;
+}
+
+vec2 blaschke_factor(vec2 w, vec2 a) {
+    vec2 numerator = w - a;
+    vec2 denominator = vec2(
+        1.0 - a.x * w.x - a.y * w.y,
+        -a.x * w.y + a.y * w.x
+    );
+    return complex_divide(numerator, denominator);
+}
 
 float positive_fract(float value) {
     return value - floor(value);
@@ -36,7 +94,6 @@ float srgb_component(float linear_value) {
     return 1.055 * pow(value, 1.0 / 2.4) - 0.055;
 }
 
-// R's hcl() convention is polar CIE L*u*v*.  These constants use D65.
 vec3 hcl_to_srgb(float hue_degrees, float chroma, float lightness) {
     float hue = radians(hue_degrees);
     float u_star = chroma * cos(hue);
@@ -66,148 +123,177 @@ vec3 hcl_to_srgb(float hue_degrees, float chroma, float lightness) {
     ), 0.0, 1.0);
 }
 
-float distance_to_segment(vec2 point, vec2 start, vec2 finish) {
+float circle_mask(vec2 point, vec2 center, float radius) {
+    return 1.0 - smoothstep(radius - 1.25, radius + 1.25, length(point - center));
+}
+
+float ring_mask(vec2 point, vec2 center, float outer_radius, float inner_radius) {
+    return max(
+        0.0,
+        circle_mask(point, center, outer_radius) - circle_mask(point, center, inner_radius)
+    );
+}
+
+float line_mask(vec2 point, vec2 start, vec2 finish, float half_width) {
     vec2 segment = finish - start;
-    float length_squared = dot(segment, segment);
-    if (length_squared < 1.0e-20) {
-        return length(point - start);
-    }
-    float along = clamp(dot(point - start, segment) / length_squared, 0.0, 1.0);
-    return length(point - (start + along * segment));
+    float denominator = max(dot(segment, segment), 1.0e-6);
+    float along = clamp(dot(point - start, segment) / denominator, 0.0, 1.0);
+    float distance_to_line = length(point - (start + along * segment));
+    return 1.0 - smoothstep(half_width - 1.0, half_width + 1.0, distance_to_line);
 }
 
 void main() {
-    vec2 z = u_center + vec2(
-        v_ndc.x * u_half_height * u_aspect,
-        v_ndc.y * u_half_height
-    );
+    float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y) * u_zoom;
+    vec2 pixel = gl_FragCoord.xy - 0.5 * u_resolution;
+    vec2 z = pixel / pixel_radius;
+    vec2 w = inverse_lasso(z);
+    float w_radius = length(w);
 
-    float phase = 0.0;
-    float log_modulus = 0.0;
+    vec2 phase_product = vec2(1.0, 0.0);
+    float modulus_product = 1.0;
 
     for (int index = 0; index < MAX_FACTORS; ++index) {
-        if (index >= u_zero_count) {
-            break;
-        }
-        vec2 delta = z - u_zeros[index];
-        phase += atan(delta.y, delta.x);
-        log_modulus += log(max(length(delta), 1.0e-12));
+        if (index >= u_zero_count) break;
+        vec2 factor = blaschke_factor(w, u_zero_preimages[index]);
+        float factor_radius = max(length(factor), 1.0e-8);
+        phase_product = complex_multiply(phase_product, factor / factor_radius);
+        modulus_product *= clamp(factor_radius, 1.0e-4, 1.0e4);
+        modulus_product = clamp(modulus_product, 1.0e-12, 1.0e12);
     }
 
     for (int index = 0; index < MAX_FACTORS; ++index) {
-        if (index >= u_pole_count) {
-            break;
-        }
-        vec2 delta = z - u_poles[index];
-        phase -= atan(delta.y, delta.x);
-        log_modulus -= log(max(length(delta), 1.0e-12));
+        if (index >= u_pole_count) break;
+        vec2 factor = blaschke_factor(w, u_pole_preimages[index]);
+        float factor_radius = max(length(factor), 1.0e-8);
+        vec2 phase_unit = factor / factor_radius;
+        phase_product = complex_multiply(
+            phase_product,
+            vec2(phase_unit.x, -phase_unit.y)
+        );
+        modulus_product *= 1.0 / clamp(factor_radius, 1.0e-4, 1.0e4);
+        modulus_product = clamp(modulus_product, 1.0e-12, 1.0e12);
     }
 
+    float phase = atan(phase_product.y, phase_product.x) + u_phase;
+    float log_modulus = log(max(modulus_product, 1.0e-12));
     float hue_degrees = 360.0 * positive_fract(phase / TAU);
     float log_modulus_band = positive_fract(log_modulus / LOG_10);
-
-    // Established Wegert constants: chroma 45; L = 66 + 4*band + 3*hue-band.
     float lightness = 66.0
         + 4.0 * log_modulus_band
         + 3.0 * positive_fract(hue_degrees / 100.0);
-
     vec3 color = hcl_to_srgb(hue_degrees, 45.0, lightness);
 
-    // Keep factors visible without replacing the phase portrait with UI chrome.
-    float world_per_pixel = (2.0 * u_half_height) / max(u_resolution.y, 1.0);
-    vec3 marker_dark = vec3(0.09411765);
-    vec3 marker_light = vec3(0.96078431, 0.94901961, 0.92156863);
+    vec2 unit_w = w_radius > 1.0e-6 ? w / w_radius : vec2(1.0, 0.0);
+    vec2 boundary_derivative;
+    lasso_map_and_derivative(unit_w, 1.0, boundary_derivative);
+    float edge_distance_pixels =
+        abs(w_radius - 1.0) * max(length(boundary_derivative), 0.15) * pixel_radius;
+    float boundary = 1.0 - smoothstep(1.2, 3.2, edge_distance_pixels);
+    color = mix(color, vec3(0.97, 0.97, 0.94), boundary);
 
-    if (u_view_kind == 1) {
-        float revealed = 0.0;
-        float boundary = 0.0;
-        float path_line = 0.0;
-        float center_mark = 0.0;
-
-        for (int index = 0; index < MAX_CONTINUATION_STEPS; ++index) {
-            if (index >= u_continuation_count) {
-                break;
-            }
-
-            vec2 disc_center = u_continuation_centers[index];
-            float disc_radius = u_continuation_radii[index];
-            float distance_from_center = length(z - disc_center);
-            if (disc_radius < 0.0) {
-                revealed = 1.0;
-            } else {
-                float edge_width = 1.25 * world_per_pixel;
-                revealed = max(
-                    revealed,
-                    1.0 - smoothstep(disc_radius - edge_width, disc_radius + edge_width, distance_from_center)
-                );
-                boundary = max(
-                    boundary,
-                    1.0 - smoothstep(
-                        1.0 * world_per_pixel,
-                        2.5 * world_per_pixel,
-                        abs(distance_from_center - disc_radius)
-                    )
-                );
-            }
-
-            center_mark = max(
-                center_mark,
-                1.0 - smoothstep(3.0, 4.5, distance_from_center / world_per_pixel)
-            );
-
-            if (index > 0) {
-                float segment_distance = distance_to_segment(
-                    z,
-                    u_continuation_centers[index - 1],
-                    disc_center
-                );
-                path_line = max(
-                    path_line,
-                    1.0 - smoothstep(1.5, 3.0, segment_distance / world_per_pixel)
-                );
-            }
-        }
-
-        // The unrevealed area must not leak values of the rational function.
-        // Use a low-contrast woven charcoal texture based only on screen pixels.
-        float diagonal_a = 0.5 + 0.5 * cos(
-            (gl_FragCoord.x + gl_FragCoord.y) * TAU / 28.0
-        );
-        float diagonal_b = 0.5 + 0.5 * cos(
-            (gl_FragCoord.x - gl_FragCoord.y) * TAU / 28.0
-        );
-        float weave = 0.5 * (
-            smoothstep(0.92, 1.0, diagonal_a) +
-            smoothstep(0.92, 1.0, diagonal_b)
-        );
-        vec3 unrevealed = vec3(0.080, 0.086, 0.096)
-            + weave * vec3(0.018, 0.020, 0.024);
-        color = mix(unrevealed, color, revealed);
-        color = mix(color, vec3(0.98, 0.95, 0.76), boundary * 0.86);
-        color = mix(color, marker_dark, path_line);
-        color = mix(color, marker_light, center_mark);
+    for (int index = 0; index < MAX_FACTORS; ++index) {
+        if (index >= u_zero_count) break;
+        float distance_pixels = length(z - u_zero_positions[index]) * pixel_radius;
+        float outer = 1.0 - smoothstep(7.0, 9.0, distance_pixels);
+        float inner = 1.0 - smoothstep(3.0, 4.5, distance_pixels);
+        color = mix(color, vec3(0.04), outer);
+        color = mix(color, vec3(0.98), inner);
     }
 
     for (int index = 0; index < MAX_FACTORS; ++index) {
-        if (index >= u_zero_count) {
-            break;
-        }
-        float radius = length(z - u_zeros[index]) / world_per_pixel;
-        if (radius < 6.0) {
-            color = radius < 4.2 ? marker_light : marker_dark;
-        }
+        if (index >= u_pole_count) break;
+        float distance_pixels = length(z - u_pole_positions[index]) * pixel_radius;
+        float outer = 1.0 - smoothstep(7.0, 9.0, distance_pixels);
+        float inner = 1.0 - smoothstep(3.0, 4.5, distance_pixels);
+        color = mix(color, vec3(0.98), outer);
+        color = mix(color, vec3(0.04), inner);
     }
 
-    for (int index = 0; index < MAX_FACTORS; ++index) {
-        if (index >= u_pole_count) {
-            break;
-        }
-        vec2 offset = (z - u_poles[index]) / world_per_pixel;
-        float left_loop = abs(length(offset - vec2(-2.2, 0.0)) - 2.7);
-        float right_loop = abs(length(offset - vec2(2.2, 0.0)) - 2.7);
-        float infinity_mark = min(left_loop, right_loop);
-        if (infinity_mark < 1.05) color = marker_dark;
+    float pause_radius = clamp(0.052 * min(u_resolution.x, u_resolution.y), 28.0, 42.0);
+    vec2 pause_center = vec2(
+        pause_radius + 16.0,
+        u_resolution.y - pause_radius - 16.0
+    );
+    float pause_disk = circle_mask(gl_FragCoord.xy, pause_center, pause_radius);
+    color = mix(color, vec3(0.04), pause_disk * 0.78);
+
+    float pause_mark = 0.0;
+    if (u_paused == 0) {
+        pause_mark = max(
+            line_mask(
+                gl_FragCoord.xy,
+                pause_center + vec2(-8.0, -11.0),
+                pause_center + vec2(-8.0, 11.0),
+                2.2
+            ),
+            line_mask(
+                gl_FragCoord.xy,
+                pause_center + vec2(8.0, -11.0),
+                pause_center + vec2(8.0, 11.0),
+                2.2
+            )
+        );
+    } else {
+        vec2 left_top = pause_center + vec2(-9.0, -12.0);
+        vec2 point = pause_center + vec2(11.0, 0.0);
+        vec2 left_bottom = pause_center + vec2(-9.0, 12.0);
+        pause_mark = max(
+            line_mask(gl_FragCoord.xy, left_top, point, 2.2),
+            line_mask(gl_FragCoord.xy, point, left_bottom, 2.2)
+        );
+        pause_mark = max(
+            pause_mark,
+            line_mask(gl_FragCoord.xy, left_bottom, left_top, 2.2)
+        );
     }
+    color = mix(color, vec3(0.98), pause_mark);
+
+    float placement_radius = clamp(0.048 * min(u_resolution.x, u_resolution.y), 26.0, 38.0);
+    vec2 zero_center = vec2(placement_radius + 16.0, placement_radius + 16.0);
+    vec2 infinity_center = zero_center + vec2(2.0 * placement_radius + 14.0, 0.0);
+
+    bool zero_selected = u_placement_kind == 0;
+    bool infinity_selected = u_placement_kind == 1;
+    float zero_disk = circle_mask(gl_FragCoord.xy, zero_center, placement_radius);
+    float infinity_disk = circle_mask(gl_FragCoord.xy, infinity_center, placement_radius);
+    color = mix(
+        color,
+        zero_selected ? vec3(0.94) : vec3(0.04),
+        zero_disk * 0.86
+    );
+    color = mix(
+        color,
+        infinity_selected ? vec3(0.94) : vec3(0.04),
+        infinity_disk * 0.86
+    );
+
+    vec3 zero_mark_color = zero_selected ? vec3(0.05) : vec3(0.96);
+    float zero_mark = ring_mask(
+        gl_FragCoord.xy,
+        zero_center,
+        placement_radius * 0.40,
+        placement_radius * 0.25
+    );
+    color = mix(color, zero_mark_color, zero_mark);
+
+    vec3 infinity_mark_color = infinity_selected ? vec3(0.05) : vec3(0.96);
+    float loop_radius = placement_radius * 0.27;
+    float loop_offset = placement_radius * 0.20;
+    float infinity_mark = max(
+        ring_mask(
+            gl_FragCoord.xy,
+            infinity_center - vec2(loop_offset, 0.0),
+            loop_radius,
+            loop_radius * 0.58
+        ),
+        ring_mask(
+            gl_FragCoord.xy,
+            infinity_center + vec2(loop_offset, 0.0),
+            loop_radius,
+            loop_radius * 0.58
+        )
+    );
+    color = mix(color, infinity_mark_color, infinity_mark);
 
     frag_color = vec4(color, 1.0);
 }

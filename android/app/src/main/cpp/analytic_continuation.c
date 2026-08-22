@@ -11,69 +11,20 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 #define LOG_TAG "AnalyticContinuation"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define MAX_FACTORS 64
 
-#include "continuation_path.h"
-#include "factor_snap.h"
-#include "factor_state.h"
-#include "gesture_state.h"
+#define MAX_FACTORS 32
+#define LASSO_COEFFICIENT_COUNT 5
+#define LASSO_SAMPLE_COUNT 120
 
-static const char *PLACEMENT_CONTROL_FRAGMENT_SHADER =
-    "#version 300 es\n"
-    "precision highp float;\n"
-    "in vec2 v_ndc;\n"
-    "uniform vec2 u_resolution;\n"
-    "uniform int u_placement_kind;\n"
-    "out vec4 out_color;\n"
-    "float circle_mask(vec2 point, vec2 center, float radius) {\n"
-    "    return 1.0 - smoothstep(radius - 1.5, radius + 1.5, length(point - center));\n"
-    "}\n"
-    "float line_mask(vec2 point, vec2 start, vec2 finish, float half_width) {\n"
-    "    vec2 segment = finish - start;\n"
-    "    float along = clamp(dot(point - start, segment) / dot(segment, segment), 0.0, 1.0);\n"
-    "    float distance_to_line = length(point - (start + along * segment));\n"
-    "    return 1.0 - smoothstep(half_width - 1.0, half_width + 1.0, distance_to_line);\n"
-    "}\n"
-    "vec4 button(vec2 point, vec2 center, bool selected, bool infinity_point) {\n"
-    "    float radius = clamp(min(u_resolution.x, u_resolution.y) * 0.065, 36.0, 56.0);\n"
-    "    float disk = circle_mask(point, center, radius);\n"
-    "    float rim = circle_mask(point, center, radius) - circle_mask(point, center, radius - 3.0);\n"
-    "    vec4 background = selected ? vec4(0.96, 0.96, 0.93, 0.94) : vec4(0.05, 0.05, 0.05, 0.72);\n"
-    "    vec3 mark_color = selected ? vec3(0.05) : vec3(0.96);\n"
-    "    float mark = 0.0;\n"
-    "    if (infinity_point) {\n"
-    "        float loop_radius = radius * 0.26;\n"
-    "        float loop_offset = radius * 0.18;\n"
-    "        float left_outer = circle_mask(point, center - vec2(loop_offset, 0.0), loop_radius);\n"
-    "        float left_inner = circle_mask(point, center - vec2(loop_offset, 0.0), loop_radius * 0.58);\n"
-    "        float right_outer = circle_mask(point, center + vec2(loop_offset, 0.0), loop_radius);\n"
-    "        float right_inner = circle_mask(point, center + vec2(loop_offset, 0.0), loop_radius * 0.58);\n"
-    "        mark = max(left_outer - left_inner, right_outer - right_inner);\n"
-    "    } else {\n"
-    "        float outer = circle_mask(point, center, radius * 0.40);\n"
-    "        float inner = circle_mask(point, center, radius * 0.27);\n"
-    "        mark = outer - inner;\n"
-    "    }\n"
-    "    vec4 color = background * disk;\n"
-    "    color.rgb = mix(color.rgb, vec3(0.96), rim);\n"
-    "    color.rgb = mix(color.rgb, mark_color, mark);\n"
-    "    color.a = max(color.a, max(rim, mark));\n"
-    "    return color;\n"
-    "}\n"
-    "void main() {\n"
-    "    vec2 point = gl_FragCoord.xy;\n"
-    "    float radius = clamp(min(u_resolution.x, u_resolution.y) * 0.065, 36.0, 56.0);\n"
-    "    float margin = max(18.0, radius * 0.38);\n"
-    "    vec2 zero_center = vec2(margin + radius, margin + radius);\n"
-    "    vec2 pole_center = zero_center + vec2(2.0 * radius + margin * 0.55, 0.0);\n"
-    "    vec4 zero_button = button(point, zero_center, u_placement_kind == 0, false);\n"
-    "    vec4 pole_button = button(point, pole_center, u_placement_kind == 1, true);\n"
-    "    out_color = zero_button.a >= pole_button.a ? zero_button : pole_button;\n"
-    "}\n";
+static const float TAU = 6.28318530717958647692f;
+static const float FACTOR_PREIMAGE_LIMIT = 0.94f;
+static const float LASSO_DERIVATIVE_BUDGET = 0.88f;
 
 static const char *VERTEX_SHADER =
     "#version 300 es\n"
@@ -85,14 +36,15 @@ static const char *VERTEX_SHADER =
     "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
     "}\n";
 
-enum factor_kind {
-    FACTOR_ZERO,
-    FACTOR_POLE
+enum placement_kind {
+    PLACEMENT_ZERO = 0,
+    PLACEMENT_INFINITY = 1
 };
 
-enum view_kind {
-    VIEW_WHOLE_PORTRAIT,
-    VIEW_CONTINUATION
+enum factor_kind {
+    FACTOR_NONE = -1,
+    FACTOR_ZERO = 0,
+    FACTOR_INFINITY = 1
 };
 
 struct engine {
@@ -107,162 +59,286 @@ struct engine {
     GLuint program;
     GLuint vao;
     GLuint vbo;
-    GLint center_location;
-    GLint half_height_location;
-    GLint aspect_location;
     GLint resolution_location;
     GLint zero_count_location;
     GLint pole_count_location;
-    GLint zeros_location;
-    GLint poles_location;
-    GLint view_kind_location;
-    GLint continuation_count_location;
-    GLint continuation_centers_location;
-    GLint continuation_radii_location;
-
-    GLuint placement_program;
-    GLint placement_resolution_location;
+    GLint zero_preimages_location;
+    GLint pole_preimages_location;
+    GLint zero_positions_location;
+    GLint pole_positions_location;
+    GLint lasso_coefficients_location;
+    GLint phase_location;
+    GLint paused_location;
+    GLint zoom_location;
     GLint placement_kind_location;
 
-    GLuint overlay_program;
-    GLuint overlay_texture;
-    GLuint clear_button_texture;
-    GLuint view_button_texture;
-    GLint overlay_resolution_location;
-    GLint overlay_origin_location;
-    GLint overlay_size_location;
-    GLint overlay_sampler_location;
-    int overlay_width;
-    int overlay_height;
-    int clear_button_width;
-    int clear_button_height;
-    int view_button_width;
-    int view_button_height;
-    bool overlay_dirty;
-    bool view_button_dirty;
-    bool overlay_unavailable;
-
-    float center[2];
-    float half_height;
-    float zeros[MAX_FACTORS][2];
-    float poles[MAX_FACTORS][2];
+    float zero_positions[MAX_FACTORS][2];
+    float zero_preimages[MAX_FACTORS][2];
     int zero_count;
+    float pole_positions[MAX_FACTORS][2];
+    float pole_preimages[MAX_FACTORS][2];
     int pole_count;
-    enum factor_kind placement_kind;
-    enum view_kind view_kind;
-    struct continuation_path continuation;
+    enum placement_kind placement_kind;
 
-    enum gesture_kind gesture;
+    float lasso_coefficients[LASSO_COEFFICIENT_COUNT][2];
+    float lasso_start_coefficients[LASSO_COEFFICIENT_COUNT][2];
+    float lasso_parameter[2];
+    bool lasso_candidate;
+    bool dragging_lasso;
+
+    float phase;
+    float phase_velocity;
+    uint32_t random_state;
+    double last_animation_time;
+    bool paused;
+
+    float zoom;
+    float pinch_start_distance;
+    float pinch_start_zoom;
+    bool pinching;
+    bool suppress_tap;
+
+    enum factor_kind candidate_kind;
+    int candidate_index;
+    bool dragging_factor;
     bool moved;
     float down_x;
     float down_y;
-    float last_x;
-    float last_y;
-    float pinch_last_distance;
-    float pinch_last_mid_x;
-    float pinch_last_mid_y;
 
     bool dirty;
     bool logged_first_frame;
 };
 
-static void placement_control_centers(
+static double monotonic_seconds(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (double)now.tv_sec + 1.0e-9 * (double)now.tv_nsec;
+}
+
+static float random_signed(struct engine *engine) {
+    uint32_t value = engine->random_state;
+    value ^= value << 13;
+    value ^= value >> 17;
+    value ^= value << 5;
+    engine->random_state = value;
+    return 2.0f * ((float)(value & 0x00ffffffu) / 16777215.0f) - 1.0f;
+}
+
+static void complex_multiply(
+    float left_x,
+    float left_y,
+    float right_x,
+    float right_y,
+    float output[2]
+) {
+    output[0] = left_x * right_x - left_y * right_y;
+    output[1] = left_x * right_y + left_y * right_x;
+}
+
+static bool complex_divide(
+    float numerator_x,
+    float numerator_y,
+    float denominator_x,
+    float denominator_y,
+    float output[2]
+) {
+    float denominator = denominator_x * denominator_x + denominator_y * denominator_y;
+    if (denominator < 1.0e-10f) {
+        return false;
+    }
+    output[0] = (numerator_x * denominator_x + numerator_y * denominator_y) / denominator;
+    output[1] = (numerator_y * denominator_x - numerator_x * denominator_y) / denominator;
+    return true;
+}
+
+static void lasso_map_with_coefficients(
+    const float coefficients[LASSO_COEFFICIENT_COUNT][2],
+    float w_x,
+    float w_y,
+    float amount,
+    float output[2],
+    float derivative[2]
+) {
+    output[0] = w_x;
+    output[1] = w_y;
+    derivative[0] = 1.0f;
+    derivative[1] = 0.0f;
+
+    float power[2] = {w_x, w_y};
+    for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
+        int degree = index + 2;
+        float next_power[2];
+        complex_multiply(power[0], power[1], w_x, w_y, next_power);
+
+        float mapped_term[2];
+        complex_multiply(
+            coefficients[index][0], coefficients[index][1],
+            next_power[0], next_power[1], mapped_term
+        );
+        output[0] += amount * mapped_term[0];
+        output[1] += amount * mapped_term[1];
+
+        float derivative_term[2];
+        complex_multiply(
+            coefficients[index][0], coefficients[index][1],
+            power[0], power[1], derivative_term
+        );
+        derivative[0] += amount * (float)degree * derivative_term[0];
+        derivative[1] += amount * (float)degree * derivative_term[1];
+
+        power[0] = next_power[0];
+        power[1] = next_power[1];
+    }
+}
+
+static void lasso_map(
     const struct engine *engine,
-    float *zero_x,
-    float *pole_x,
-    float *center_y
-);
-
-static void clear_continuation_path(struct engine *engine) {
-    continuation_path_clear(&engine->continuation);
-    engine->dirty = true;
+    float w_x,
+    float w_y,
+    float output[2]
+) {
+    float derivative[2];
+    lasso_map_with_coefficients(
+        engine->lasso_coefficients, w_x, w_y, 1.0f, output, derivative
+    );
 }
 
-static void set_whole_portrait_view(struct engine *engine) {
-    if (engine->view_kind == VIEW_WHOLE_PORTRAIT) {
-        return;
-    }
-    engine->view_kind = VIEW_WHOLE_PORTRAIT;
-    engine->view_button_dirty = true;
-    engine->dirty = true;
-    LOGI("whole portrait view enabled");
-}
+static bool inverse_lasso_with_coefficients(
+    const float coefficients[LASSO_COEFFICIENT_COUNT][2],
+    float z_x,
+    float z_y,
+    float output[2]
+) {
+    float w_x = z_x;
+    float w_y = z_y;
 
-static void set_continuation_view(struct engine *engine) {
-    if (engine->view_kind == VIEW_CONTINUATION) {
-        return;
-    }
-
-    if (engine->continuation.count == 0) {
-        if (continuation_path_seed(
-                &engine->continuation,
-                engine->center[0],
-                engine->center[1],
-                engine->zeros,
-                engine->zero_count,
-                engine->poles,
-                engine->pole_count
-            )) {
-            LOGI(
-                "continuation seeded at %.6g%+.6gi radius=%.9g",
-                engine->center[0],
-                engine->center[1],
-                engine->continuation.radii[0]
+    for (int stage = 1; stage <= 4; ++stage) {
+        float amount = 0.25f * (float)stage;
+        for (int iteration = 0; iteration < 4; ++iteration) {
+            float mapped[2];
+            float derivative[2];
+            lasso_map_with_coefficients(
+                coefficients, w_x, w_y, amount, mapped, derivative
             );
-        } else {
-            LOGI("continuation seed rejected: camera center is an uncancelled pole");
+
+            float correction[2];
+            if (!complex_divide(
+                    mapped[0] - z_x, mapped[1] - z_y,
+                    derivative[0], derivative[1], correction
+                )) {
+                return false;
+            }
+
+            float correction_length = hypotf(correction[0], correction[1]);
+            if (correction_length > 0.55f) {
+                float scale = 0.55f / correction_length;
+                correction[0] *= scale;
+                correction[1] *= scale;
+            }
+            w_x -= correction[0];
+            w_y -= correction[1];
         }
     }
 
-    engine->view_kind = VIEW_CONTINUATION;
-    engine->view_button_dirty = true;
-    engine->dirty = true;
-    LOGI("continuation view enabled");
+    float mapped[2];
+    float derivative[2];
+    lasso_map_with_coefficients(coefficients, w_x, w_y, 1.0f, mapped, derivative);
+    float residual = hypotf(mapped[0] - z_x, mapped[1] - z_y);
+    output[0] = w_x;
+    output[1] = w_y;
+    return residual < 2.0e-3f;
 }
 
-static void toggle_view(struct engine *engine) {
-    if (engine->view_kind == VIEW_CONTINUATION) {
-        set_whole_portrait_view(engine);
-    } else {
-        set_continuation_view(engine);
+static bool inverse_lasso(
+    const struct engine *engine,
+    float z_x,
+    float z_y,
+    float output[2]
+) {
+    return inverse_lasso_with_coefficients(
+        engine->lasso_coefficients, z_x, z_y, output
+    );
+}
+
+static float lasso_derivative_budget(
+    const float coefficients[LASSO_COEFFICIENT_COUNT][2]
+) {
+    float budget = 0.0f;
+    for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
+        budget += (float)(index + 2) * hypotf(
+            coefficients[index][0], coefficients[index][1]
+        );
     }
+    return budget;
 }
 
-static void initialize_function(struct engine *engine) {
-    engine->center[0] = 0.0f;
-    engine->center[1] = 0.0f;
-    engine->half_height = 3.5f;
+static bool compute_preimages(
+    const float positions[MAX_FACTORS][2],
+    int count,
+    const float coefficients[LASSO_COEFFICIENT_COUNT][2],
+    float output[MAX_FACTORS][2]
+) {
+    for (int index = 0; index < count; ++index) {
+        float preimage[2];
+        if (!inverse_lasso_with_coefficients(
+                coefficients, positions[index][0], positions[index][1], preimage
+            )) {
+            return false;
+        }
+        if (hypotf(preimage[0], preimage[1]) >= FACTOR_PREIMAGE_LIMIT) {
+            return false;
+        }
+        output[index][0] = preimage[0];
+        output[index][1] = preimage[1];
+    }
+    return true;
+}
 
-    // Start with a genuinely non-polynomial rational map:
-    //                  z + 1
-    //         g(z) = ---------
-    //                  z - 1
-    // The finite pole at 1 gives the camera-center Taylor disc radius 1.
+static bool coefficients_are_valid(
+    const struct engine *engine,
+    const float coefficients[LASSO_COEFFICIENT_COUNT][2],
+    float zero_preimages[MAX_FACTORS][2],
+    float pole_preimages[MAX_FACTORS][2]
+) {
+    if (lasso_derivative_budget(coefficients) > LASSO_DERIVATIVE_BUDGET) {
+        return false;
+    }
+    return compute_preimages(
+        engine->zero_positions, engine->zero_count, coefficients, zero_preimages
+    ) && compute_preimages(
+        engine->pole_positions, engine->pole_count, coefficients, pole_preimages
+    );
+}
+
+static void initialize_lasso(struct engine *engine) {
+    memset(engine->lasso_coefficients, 0, sizeof(engine->lasso_coefficients));
+
     engine->zero_count = 1;
-    engine->zeros[0][0] = -1.0f;
-    engine->zeros[0][1] = 0.0f;
-    engine->pole_count = 1;
-    engine->poles[0][0] = 1.0f;
-    engine->poles[0][1] = 0.0f;
-    engine->placement_kind = FACTOR_ZERO;
-    engine->view_kind = VIEW_WHOLE_PORTRAIT;
-    continuation_path_clear(&engine->continuation);
-    engine->overlay_dirty = true;
-    engine->view_button_dirty = true;
-    engine->dirty = true;
-    set_continuation_view(engine);
-}
-
-static void reset_all(struct engine *engine) {
-    initialize_function(engine);
-    LOGI("default function, camera, view, and continuation path reset");
-}
-
-static void clear_function(struct engine *engine) {
-    engine->zero_count = 0;
+    engine->zero_positions[0][0] = 0.0f;
+    engine->zero_positions[0][1] = 0.0f;
+    engine->zero_preimages[0][0] = 0.0f;
+    engine->zero_preimages[0][1] = 0.0f;
     engine->pole_count = 0;
-    continuation_path_clear(&engine->continuation);
-    engine->overlay_dirty = true;
+    engine->placement_kind = PLACEMENT_ZERO;
+
+    engine->phase = 0.0f;
+    engine->phase_velocity = 0.48f;
+    engine->random_state = 0xa341316cu;
+    engine->last_animation_time = monotonic_seconds();
+    engine->paused = false;
+
+    engine->zoom = 1.0f;
+    engine->pinch_start_distance = 0.0f;
+    engine->pinch_start_zoom = 1.0f;
+    engine->pinching = false;
+    engine->suppress_tap = false;
+
+    engine->candidate_kind = FACTOR_NONE;
+    engine->candidate_index = -1;
+    engine->dragging_factor = false;
+    engine->lasso_candidate = false;
+    engine->dragging_lasso = false;
+    engine->moved = false;
     engine->dirty = true;
 }
 
@@ -291,7 +367,6 @@ static char *load_asset_text(AAssetManager *manager, const char *name) {
         }
         offset += amount;
     }
-
     text[length] = '\0';
     AAsset_close(asset);
     return text;
@@ -348,8 +423,6 @@ static GLuint link_program(GLuint vertex_shader, GLuint fragment_shader) {
     return 0;
 }
 
-#include "polynomial_overlay.h"
-
 static bool create_renderer(struct engine *engine) {
     static const GLfloat fullscreen_triangle[] = {
         -1.0f, -1.0f,
@@ -358,8 +431,7 @@ static bool create_renderer(struct engine *engine) {
     };
 
     char *fragment_source = load_asset_text(
-        engine->app->activity->assetManager,
-        "continuation.frag"
+        engine->app->activity->assetManager, "continuation.frag"
     );
     if (fragment_source == NULL) {
         return false;
@@ -368,7 +440,6 @@ static bool create_renderer(struct engine *engine) {
     GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, VERTEX_SHADER);
     GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
     free(fragment_source);
-
     if (vertex_shader == 0 || fragment_shader == 0) {
         if (vertex_shader != 0) glDeleteShader(vertex_shader);
         if (fragment_shader != 0) glDeleteShader(fragment_shader);
@@ -382,57 +453,33 @@ static bool create_renderer(struct engine *engine) {
         return false;
     }
 
-    engine->center_location = glGetUniformLocation(engine->program, "u_center");
-    engine->half_height_location = glGetUniformLocation(engine->program, "u_half_height");
-    engine->aspect_location = glGetUniformLocation(engine->program, "u_aspect");
     engine->resolution_location = glGetUniformLocation(engine->program, "u_resolution");
     engine->zero_count_location = glGetUniformLocation(engine->program, "u_zero_count");
     engine->pole_count_location = glGetUniformLocation(engine->program, "u_pole_count");
-    engine->zeros_location = glGetUniformLocation(engine->program, "u_zeros[0]");
-    engine->poles_location = glGetUniformLocation(engine->program, "u_poles[0]");
-    engine->view_kind_location = glGetUniformLocation(engine->program, "u_view_kind");
-    engine->continuation_count_location = glGetUniformLocation(
-        engine->program,
-        "u_continuation_count"
-    );
-    engine->continuation_centers_location = glGetUniformLocation(
-        engine->program,
-        "u_continuation_centers[0]"
-    );
-    engine->continuation_radii_location = glGetUniformLocation(
-        engine->program,
-        "u_continuation_radii[0]"
-    );
+    engine->zero_preimages_location = glGetUniformLocation(engine->program, "u_zero_preimages[0]");
+    engine->pole_preimages_location = glGetUniformLocation(engine->program, "u_pole_preimages[0]");
+    engine->zero_positions_location = glGetUniformLocation(engine->program, "u_zero_positions[0]");
+    engine->pole_positions_location = glGetUniformLocation(engine->program, "u_pole_positions[0]");
+    engine->lasso_coefficients_location = glGetUniformLocation(engine->program, "u_lasso_coefficients[0]");
+    engine->phase_location = glGetUniformLocation(engine->program, "u_phase");
+    engine->paused_location = glGetUniformLocation(engine->program, "u_paused");
+    engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
+    engine->placement_kind_location = glGetUniformLocation(engine->program, "u_placement_kind");
 
-    GLuint placement_vertex_shader = compile_shader(GL_VERTEX_SHADER, VERTEX_SHADER);
-    GLuint placement_fragment_shader = compile_shader(
-        GL_FRAGMENT_SHADER,
-        PLACEMENT_CONTROL_FRAGMENT_SHADER
-    );
-    if (placement_vertex_shader != 0 && placement_fragment_shader != 0) {
-        engine->placement_program = link_program(
-            placement_vertex_shader,
-            placement_fragment_shader
-        );
-    }
-    if (placement_vertex_shader != 0) glDeleteShader(placement_vertex_shader);
-    if (placement_fragment_shader != 0) glDeleteShader(placement_fragment_shader);
-    if (engine->placement_program == 0) {
-        LOGE("placement controls unavailable");
-    } else {
-        engine->placement_resolution_location = glGetUniformLocation(
-            engine->placement_program,
-            "u_resolution"
-        );
-        engine->placement_kind_location = glGetUniformLocation(
-            engine->placement_program,
-            "u_placement_kind"
-        );
+    if (
+        engine->resolution_location < 0 || engine->zero_count_location < 0 ||
+        engine->pole_count_location < 0 || engine->zero_preimages_location < 0 ||
+        engine->pole_preimages_location < 0 || engine->zero_positions_location < 0 ||
+        engine->pole_positions_location < 0 || engine->lasso_coefficients_location < 0 ||
+        engine->phase_location < 0 || engine->paused_location < 0 ||
+        engine->zoom_location < 0 || engine->placement_kind_location < 0
+    ) {
+        LOGE("lasso shader uniforms unavailable");
+        return false;
     }
 
     glGenVertexArrays(1, &engine->vao);
     glBindVertexArray(engine->vao);
-
     glGenBuffers(1, &engine->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, engine->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(fullscreen_triangle), fullscreen_triangle, GL_STATIC_DRAW);
@@ -444,11 +491,10 @@ static bool create_renderer(struct engine *engine) {
     glDisable(GL_SCISSOR_TEST);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-    LOGI("renderer ready: GL_VERSION=%s GL_RENDERER=%s program=%u vao=%u vbo=%u uniforms=%d,%d,%d,%d,%d,%d,%d,%d",
-         glGetString(GL_VERSION), glGetString(GL_RENDERER), engine->program, engine->vao, engine->vbo,
-         engine->center_location, engine->half_height_location, engine->aspect_location,
-         engine->resolution_location, engine->zero_count_location, engine->pole_count_location,
-         engine->zeros_location, engine->poles_location);
+    LOGI(
+        "lasso renderer ready: GL_VERSION=%s GL_RENDERER=%s",
+        glGetString(GL_VERSION), glGetString(GL_RENDERER)
+    );
     return true;
 }
 
@@ -512,7 +558,6 @@ static bool initialize_display(struct engine *engine) {
     engine->context = context;
     eglQuerySurface(display, surface, EGL_WIDTH, &engine->width);
     eglQuerySurface(display, surface, EGL_HEIGHT, &engine->height);
-    LOGI("EGL surface ready: %dx%d", engine->width, engine->height);
 
     if (!create_renderer(engine)) {
         eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -526,8 +571,12 @@ static bool initialize_display(struct engine *engine) {
     }
 
     glViewport(0, 0, engine->width, engine->height);
-    engine->overlay_dirty = true;
+    engine->last_animation_time = monotonic_seconds();
     engine->dirty = true;
+    LOGI(
+        "lasso ready: surface=%dx%d zeros=%d poles=%d placement=zero outside=domain-coloring",
+        engine->width, engine->height, engine->zero_count, engine->pole_count
+    );
     return true;
 }
 
@@ -536,7 +585,6 @@ static void terminate_display(struct engine *engine) {
         return;
     }
 
-    polynomial_overlay_destroy(engine);
     if (engine->vbo != 0) {
         glDeleteBuffers(1, &engine->vbo);
         engine->vbo = 0;
@@ -549,20 +597,11 @@ static void terminate_display(struct engine *engine) {
         glDeleteProgram(engine->program);
         engine->program = 0;
     }
-    if (engine->placement_program != 0) {
-        glDeleteProgram(engine->placement_program);
-        engine->placement_program = 0;
-    }
 
     eglMakeCurrent(engine->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    if (engine->context != EGL_NO_CONTEXT) {
-        eglDestroyContext(engine->display, engine->context);
-    }
-    if (engine->surface != EGL_NO_SURFACE) {
-        eglDestroySurface(engine->display, engine->surface);
-    }
+    if (engine->context != EGL_NO_CONTEXT) eglDestroyContext(engine->display, engine->context);
+    if (engine->surface != EGL_NO_SURFACE) eglDestroySurface(engine->display, engine->surface);
     eglTerminate(engine->display);
-
     engine->display = EGL_NO_DISPLAY;
     engine->surface = EGL_NO_SURFACE;
     engine->context = EGL_NO_CONTEXT;
@@ -575,81 +614,64 @@ static void update_surface_size(struct engine *engine) {
     eglQuerySurface(engine->display, engine->surface, EGL_WIDTH, &engine->width);
     eglQuerySurface(engine->display, engine->surface, EGL_HEIGHT, &engine->height);
     glViewport(0, 0, engine->width, engine->height);
-    engine->overlay_dirty = true;
     engine->dirty = true;
 }
 
+static float lasso_pixel_radius(const struct engine *engine) {
+    return 0.42f * fminf((float)engine->width, (float)engine->height);
+}
+
+static float view_pixel_radius(const struct engine *engine) {
+    return lasso_pixel_radius(engine) * engine->zoom;
+}
+
 static void draw_frame(struct engine *engine) {
-    if (engine->display == EGL_NO_DISPLAY || engine->program == 0 || engine->width <= 0 || engine->height <= 0) {
+    if (
+        engine->display == EGL_NO_DISPLAY || engine->program == 0 ||
+        engine->width <= 0 || engine->height <= 0
+    ) {
         return;
     }
 
-    float aspect = (float)engine->width / (float)engine->height;
-
     glUseProgram(engine->program);
-    glUniform2f(engine->center_location, engine->center[0], engine->center[1]);
-    glUniform1f(engine->half_height_location, engine->half_height);
-    glUniform1f(engine->aspect_location, aspect);
     glUniform2f(engine->resolution_location, (float)engine->width, (float)engine->height);
     glUniform1i(engine->zero_count_location, engine->zero_count);
     glUniform1i(engine->pole_count_location, engine->pole_count);
-    glUniform2fv(engine->zeros_location, MAX_FACTORS, &engine->zeros[0][0]);
-    glUniform2fv(engine->poles_location, MAX_FACTORS, &engine->poles[0][0]);
-    glUniform1i(engine->view_kind_location, (int)engine->view_kind);
-    glUniform1i(engine->continuation_count_location, engine->continuation.count);
+    glUniform2fv(engine->zero_preimages_location, MAX_FACTORS, &engine->zero_preimages[0][0]);
+    glUniform2fv(engine->pole_preimages_location, MAX_FACTORS, &engine->pole_preimages[0][0]);
+    glUniform2fv(engine->zero_positions_location, MAX_FACTORS, &engine->zero_positions[0][0]);
+    glUniform2fv(engine->pole_positions_location, MAX_FACTORS, &engine->pole_positions[0][0]);
     glUniform2fv(
-        engine->continuation_centers_location,
-        MAX_CONTINUATION_STEPS,
-        &engine->continuation.centers[0][0]
+        engine->lasso_coefficients_location,
+        LASSO_COEFFICIENT_COUNT,
+        &engine->lasso_coefficients[0][0]
     );
-    glUniform1fv(
-        engine->continuation_radii_location,
-        MAX_CONTINUATION_STEPS,
-        engine->continuation.radii
-    );
+    glUniform1f(engine->phase_location, engine->phase);
+    glUniform1i(engine->paused_location, engine->paused ? 1 : 0);
+    glUniform1f(engine->zoom_location, engine->zoom);
+    glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
 
     glBindVertexArray(engine->vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-    polynomial_overlay_draw(engine);
-
-    if (engine->placement_program != 0) {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glUseProgram(engine->placement_program);
-        glUniform2f(
-            engine->placement_resolution_location,
-            (float)engine->width,
-            (float)engine->height
-        );
-        glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
-        glBindVertexArray(engine->vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-        glDisable(GL_BLEND);
-    }
 
     if (!engine->logged_first_frame) {
-        float zero_control_x = 0.0f;
-        float pole_control_x = 0.0f;
-        float placement_control_y = 0.0f;
-        placement_control_centers(
-            engine,
-            &zero_control_x,
-            &pole_control_x,
-            &placement_control_y
+        GLubyte center_pixel[4] = {0, 0, 0, 0};
+        GLubyte outside_pixel[4] = {0, 0, 0, 0};
+        glReadPixels(
+            engine->width / 2, engine->height / 2, 1, 1,
+            GL_RGBA, GL_UNSIGNED_BYTE, center_pixel
+        );
+        int outside_y = engine->height / 2 + (int)(1.25f * view_pixel_radius(engine));
+        if (outside_y >= engine->height) outside_y = engine->height - 1;
+        glReadPixels(
+            engine->width / 2, outside_y, 1, 1,
+            GL_RGBA, GL_UNSIGNED_BYTE, outside_pixel
         );
         LOGI(
-            "placement control centers: zero=%d,%d infinity=%d,%d",
-            (int)zero_control_x,
-            (int)placement_control_y,
-            (int)pole_control_x,
-            (int)placement_control_y
+            "lasso first frame: center rgba=%u,%u,%u,%u outside rgba=%u,%u,%u,%u",
+            center_pixel[0], center_pixel[1], center_pixel[2], center_pixel[3],
+            outside_pixel[0], outside_pixel[1], outside_pixel[2], outside_pixel[3]
         );
-
-        GLubyte pixel[4] = {0, 0, 0, 0};
-        glReadPixels(engine->width / 2, engine->height / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-        GLenum error = glGetError();
-        LOGI("first frame: center rgba=%u,%u,%u,%u glError=0x%x",
-             pixel[0], pixel[1], pixel[2], pixel[3], error);
         engine->logged_first_frame = true;
     }
 
@@ -659,376 +681,490 @@ static void draw_frame(struct engine *engine) {
     engine->dirty = false;
 }
 
-static void screen_to_complex(const struct engine *engine, float x, float y, float output[2]) {
-    float width = (float)engine->width;
-    float height = (float)engine->height;
-    float aspect = width / height;
-    float ndc_x = 2.0f * x / width - 1.0f;
-    float ndc_y = 1.0f - 2.0f * y / height;
-
-    output[0] = engine->center[0] + ndc_x * engine->half_height * aspect;
-    output[1] = engine->center[1] + ndc_y * engine->half_height;
+static void screen_to_plane(
+    const struct engine *engine,
+    float x,
+    float y,
+    float output[2]
+) {
+    float scale = view_pixel_radius(engine);
+    output[0] = (x - 0.5f * (float)engine->width) / scale;
+    output[1] = (0.5f * (float)engine->height - y) / scale;
 }
 
-static float factor_touch_radius_pixels(const struct engine *engine) {
-    int density = AConfiguration_getDensity(engine->app->config);
-    if (density < 72 || density > 1000) {
-        density = 160;
-    }
-
-    float radius = 24.0f * (float)density / 160.0f;
-    if (radius < 24.0f) radius = 24.0f;
-    if (radius > 72.0f) radius = 72.0f;
+static float control_radius(const struct engine *engine) {
+    float radius = 0.052f * fminf((float)engine->width, (float)engine->height);
+    if (radius < 28.0f) radius = 28.0f;
+    if (radius > 42.0f) radius = 42.0f;
     return radius;
 }
 
-static void snap_touch_to_factors(
-    const struct engine *engine,
-    float point[2],
-    float factors[MAX_FACTORS][2],
-    int factor_count
-) {
-    float world_per_pixel = 2.0f * engine->half_height / (float)engine->height;
-    factor_snap_to_nearest(
-        point,
-        factors,
-        factor_count,
-        world_per_pixel,
-        factor_touch_radius_pixels(engine)
-    );
-}
-
-static void pan_by_pixels(struct engine *engine, float delta_x, float delta_y) {
-    if (engine->width <= 0 || engine->height <= 0) {
-        return;
-    }
-    float aspect = (float)engine->width / (float)engine->height;
-    engine->center[0] -= 2.0f * delta_x * engine->half_height * aspect / (float)engine->width;
-    engine->center[1] += 2.0f * delta_y * engine->half_height / (float)engine->height;
-    engine->dirty = true;
-}
-
-static void add_zero(struct engine *engine, float x, float y) {
-    if (engine->width <= 0 || engine->height <= 0) {
-        return;
-    }
-
-    float factor[2];
-    screen_to_complex(engine, x, y, factor);
-    snap_touch_to_factors(engine, factor, engine->poles, engine->pole_count);
-    enum factor_change change = factor_insert_reduced(
-        engine->zeros,
-        &engine->zero_count,
-        engine->poles,
-        &engine->pole_count,
-        factor[0],
-        factor[1]
-    );
-    if (change == FACTOR_UNCHANGED) {
-        return;
-    }
-
-    continuation_path_clear(&engine->continuation);
-    engine->overlay_dirty = true;
-    engine->dirty = true;
-}
-
-static void add_pole(struct engine *engine, float x, float y) {
-    if (engine->width <= 0 || engine->height <= 0) {
-        return;
-    }
-
-    float factor[2];
-    screen_to_complex(engine, x, y, factor);
-    snap_touch_to_factors(engine, factor, engine->zeros, engine->zero_count);
-    enum factor_change change = factor_insert_reduced(
-        engine->poles,
-        &engine->pole_count,
-        engine->zeros,
-        &engine->zero_count,
-        factor[0],
-        factor[1]
-    );
-    if (change == FACTOR_UNCHANGED) {
-        return;
-    }
-
-    continuation_path_clear(&engine->continuation);
-    engine->overlay_dirty = true;
-    engine->dirty = true;
-}
-
-static void add_continuation_center(struct engine *engine, float x, float y) {
-    if (engine->width <= 0 || engine->height <= 0) {
-        return;
-    }
-
-    float center[2];
-    screen_to_complex(engine, x, y, center);
-    snap_touch_to_factors(engine, center, engine->poles, engine->pole_count);
-    bool accepted = continuation_path_add_center(
-        &engine->continuation,
-        center[0],
-        center[1],
-        engine->zeros,
-        engine->zero_count,
-        engine->poles,
-        engine->pole_count
-    );
-    if (accepted) {
-        int step = engine->continuation.count - 1;
-        if (engine->continuation.count == 1) {
-            LOGI(
-                "continuation seed added: center=%.6g%+.6gi radius=%.6g",
-                center[0],
-                center[1],
-                engine->continuation.radii[step]
-            );
-        } else {
-            LOGI(
-                "continuation step added: center=%.6g%+.6gi radius=%.6g",
-                center[0],
-                center[1],
-                engine->continuation.radii[step]
-            );
-        }
-        engine->dirty = true;
-    } else {
-        if (engine->continuation.count == 0) {
-            LOGI("continuation seed rejected: tap is an uncancelled pole");
-        } else {
-            LOGI("continuation step rejected: tap must be inside the preceding Taylor disc");
-        }
-    }
-}
-
-static float placement_control_radius(const struct engine *engine) {
-    float radius = 0.065f * fminf((float)engine->width, (float)engine->height);
-    if (radius < 36.0f) radius = 36.0f;
-    if (radius > 56.0f) radius = 56.0f;
+static float placement_radius(const struct engine *engine) {
+    float radius = 0.048f * fminf((float)engine->width, (float)engine->height);
+    if (radius < 26.0f) radius = 26.0f;
+    if (radius > 38.0f) radius = 38.0f;
     return radius;
 }
 
-static void placement_control_centers(
-    const struct engine *engine,
-    float *zero_x,
-    float *pole_x,
-    float *center_y
-) {
-    float radius = placement_control_radius(engine);
-    float margin = fmaxf(18.0f, radius * 0.38f);
-    *zero_x = margin + radius;
-    *pole_x = *zero_x + 2.0f * radius + margin * 0.55f;
-    *center_y = (float)engine->height - margin - radius;
+static bool pause_control_contains(const struct engine *engine, float x, float y) {
+    float radius = control_radius(engine);
+    return hypotf(x - radius - 16.0f, y - radius - 16.0f) <= radius;
 }
 
 static bool placement_control_hit(
     const struct engine *engine,
     float x,
     float y,
-    enum factor_kind *kind
+    enum placement_kind *kind
 ) {
-    if (engine->width <= 0 || engine->height <= 0) {
-        return false;
-    }
+    float radius = placement_radius(engine);
+    float zero_x = radius + 16.0f;
+    float infinity_x = zero_x + 2.0f * radius + 14.0f;
+    float center_y = (float)engine->height - radius - 16.0f;
 
-    float radius = placement_control_radius(engine);
-    float zero_center_x = 0.0f;
-    float pole_center_x = 0.0f;
-    float center_y = 0.0f;
-    placement_control_centers(
-        engine,
-        &zero_center_x,
-        &pole_center_x,
-        &center_y
-    );
-
-    if (hypotf(x - zero_center_x, y - center_y) <= radius) {
-        *kind = FACTOR_ZERO;
+    if (hypotf(x - zero_x, y - center_y) <= radius) {
+        *kind = PLACEMENT_ZERO;
         return true;
     }
-    if (hypotf(x - pole_center_x, y - center_y) <= radius) {
-        *kind = FACTOR_POLE;
+    if (hypotf(x - infinity_x, y - center_y) <= radius) {
+        *kind = PLACEMENT_INFINITY;
         return true;
     }
     return false;
 }
 
-static float pointer_distance(const AInputEvent *event) {
-    float dx = AMotionEvent_getX(event, 0) - AMotionEvent_getX(event, 1);
-    float dy = AMotionEvent_getY(event, 0) - AMotionEvent_getY(event, 1);
+static void nearest_factor(
+    const struct engine *engine,
+    float x,
+    float y,
+    enum factor_kind *kind,
+    int *factor_index
+) {
+    *kind = FACTOR_NONE;
+    *factor_index = -1;
+    if (engine->width <= 0 || engine->height <= 0) {
+        return;
+    }
+
+    float point[2];
+    screen_to_plane(engine, x, y, point);
+    float scale = view_pixel_radius(engine);
+    float best_distance = 38.0f;
+
+    for (int index = 0; index < engine->zero_count; ++index) {
+        float distance = hypotf(
+            (point[0] - engine->zero_positions[index][0]) * scale,
+            (point[1] - engine->zero_positions[index][1]) * scale
+        );
+        if (distance < best_distance) {
+            best_distance = distance;
+            *kind = FACTOR_ZERO;
+            *factor_index = index;
+        }
+    }
+    for (int index = 0; index < engine->pole_count; ++index) {
+        float distance = hypotf(
+            (point[0] - engine->pole_positions[index][0]) * scale,
+            (point[1] - engine->pole_positions[index][1]) * scale
+        );
+        if (distance < best_distance) {
+            best_distance = distance;
+            *kind = FACTOR_INFINITY;
+            *factor_index = index;
+        }
+    }
+}
+
+static bool nearest_lasso_parameter(
+    const struct engine *engine,
+    float x,
+    float y,
+    float output[2]
+) {
+    if (engine->width <= 0 || engine->height <= 0) {
+        return false;
+    }
+
+    float point[2];
+    screen_to_plane(engine, x, y, point);
+    float scale = view_pixel_radius(engine);
+    float best_distance = 44.0f;
+    bool found = false;
+
+    for (int sample = 0; sample < LASSO_SAMPLE_COUNT; ++sample) {
+        float angle = TAU * (float)sample / (float)LASSO_SAMPLE_COUNT;
+        float w_x = cosf(angle);
+        float w_y = sinf(angle);
+        float mapped[2];
+        lasso_map(engine, w_x, w_y, mapped);
+        float distance = hypotf(
+            (point[0] - mapped[0]) * scale,
+            (point[1] - mapped[1]) * scale
+        );
+        if (distance < best_distance) {
+            best_distance = distance;
+            output[0] = w_x;
+            output[1] = w_y;
+            found = true;
+        }
+    }
+    return found;
+}
+
+static void move_factor(
+    struct engine *engine,
+    enum factor_kind kind,
+    int index,
+    float x,
+    float y
+) {
+    float (*positions)[2] = kind == FACTOR_ZERO ? engine->zero_positions : engine->pole_positions;
+    float (*preimages)[2] = kind == FACTOR_ZERO ? engine->zero_preimages : engine->pole_preimages;
+    int count = kind == FACTOR_ZERO ? engine->zero_count : engine->pole_count;
+    if (kind == FACTOR_NONE || index < 0 || index >= count) {
+        return;
+    }
+
+    float point[2];
+    screen_to_plane(engine, x, y, point);
+    float preimage[2];
+    if (!inverse_lasso(engine, point[0], point[1], preimage)) {
+        return;
+    }
+
+    float radius = hypotf(preimage[0], preimage[1]);
+    if (radius >= FACTOR_PREIMAGE_LIMIT && radius > 0.0f) {
+        float scale = FACTOR_PREIMAGE_LIMIT / radius;
+        preimage[0] *= scale;
+        preimage[1] *= scale;
+        lasso_map(engine, preimage[0], preimage[1], point);
+    }
+
+    positions[index][0] = point[0];
+    positions[index][1] = point[1];
+    preimages[index][0] = preimage[0];
+    preimages[index][1] = preimage[1];
+    engine->dirty = true;
+}
+
+static void add_factor(
+    struct engine *engine,
+    enum placement_kind placement,
+    float x,
+    float y
+) {
+    int *count = placement == PLACEMENT_ZERO ? &engine->zero_count : &engine->pole_count;
+    float (*positions)[2] = placement == PLACEMENT_ZERO ? engine->zero_positions : engine->pole_positions;
+    float (*preimages)[2] = placement == PLACEMENT_ZERO ? engine->zero_preimages : engine->pole_preimages;
+    const char *name = placement == PLACEMENT_ZERO ? "zero" : "infinity";
+
+    if (*count >= MAX_FACTORS) {
+        LOGI("%s ignored: limit=%d", name, MAX_FACTORS);
+        return;
+    }
+
+    float point[2];
+    screen_to_plane(engine, x, y, point);
+    float preimage[2];
+    if (!inverse_lasso(engine, point[0], point[1], preimage)) {
+        return;
+    }
+    if (hypotf(preimage[0], preimage[1]) >= FACTOR_PREIMAGE_LIMIT) {
+        LOGI("%s ignored: tap outside lasso", name);
+        return;
+    }
+
+    int index = *count;
+    positions[index][0] = point[0];
+    positions[index][1] = point[1];
+    preimages[index][0] = preimage[0];
+    preimages[index][1] = preimage[1];
+    *count += 1;
+    engine->dirty = true;
+
+    LOGI(
+        "%s added: z=%.6g%+.6gi preimage=%.6g%+.6gi count=%d",
+        name, point[0], point[1], preimage[0], preimage[1], *count
+    );
+}
+
+static void begin_lasso_drag(struct engine *engine) {
+    memcpy(
+        engine->lasso_start_coefficients,
+        engine->lasso_coefficients,
+        sizeof(engine->lasso_coefficients)
+    );
+}
+
+static void deform_lasso(struct engine *engine, float x, float y) {
+    float target[2];
+    screen_to_plane(engine, x, y, target);
+
+    float start_point[2];
+    float derivative[2];
+    lasso_map_with_coefficients(
+        engine->lasso_start_coefficients,
+        engine->lasso_parameter[0], engine->lasso_parameter[1],
+        1.0f, start_point, derivative
+    );
+
+    float delta_x = target[0] - start_point[0];
+    float delta_y = target[1] - start_point[1];
+    float coefficient_delta[LASSO_COEFFICIENT_COUNT][2];
+    float power[2] = {engine->lasso_parameter[0], engine->lasso_parameter[1]};
+
+    for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
+        float next_power[2];
+        complex_multiply(
+            power[0], power[1],
+            engine->lasso_parameter[0], engine->lasso_parameter[1],
+            next_power
+        );
+        coefficient_delta[index][0] =
+            (delta_x * next_power[0] + delta_y * next_power[1]) /
+            (float)LASSO_COEFFICIENT_COUNT;
+        coefficient_delta[index][1] =
+            (delta_y * next_power[0] - delta_x * next_power[1]) /
+            (float)LASSO_COEFFICIENT_COUNT;
+        power[0] = next_power[0];
+        power[1] = next_power[1];
+    }
+
+    float best_coefficients[LASSO_COEFFICIENT_COUNT][2];
+    float best_zero_preimages[MAX_FACTORS][2];
+    float best_pole_preimages[MAX_FACTORS][2];
+    memcpy(best_coefficients, engine->lasso_start_coefficients, sizeof(best_coefficients));
+    memcpy(best_zero_preimages, engine->zero_preimages, sizeof(best_zero_preimages));
+    memcpy(best_pole_preimages, engine->pole_preimages, sizeof(best_pole_preimages));
+
+    float low = 0.0f;
+    float high = 1.0f;
+    for (int search = 0; search < 13; ++search) {
+        float amount = 0.5f * (low + high);
+        float candidate[LASSO_COEFFICIENT_COUNT][2];
+        float candidate_zero_preimages[MAX_FACTORS][2];
+        float candidate_pole_preimages[MAX_FACTORS][2];
+        for (int index = 0; index < LASSO_COEFFICIENT_COUNT; ++index) {
+            candidate[index][0] = engine->lasso_start_coefficients[index][0] + amount * coefficient_delta[index][0];
+            candidate[index][1] = engine->lasso_start_coefficients[index][1] + amount * coefficient_delta[index][1];
+        }
+
+        if (coefficients_are_valid(
+                engine, candidate, candidate_zero_preimages, candidate_pole_preimages
+            )) {
+            low = amount;
+            memcpy(best_coefficients, candidate, sizeof(best_coefficients));
+            memcpy(best_zero_preimages, candidate_zero_preimages, sizeof(best_zero_preimages));
+            memcpy(best_pole_preimages, candidate_pole_preimages, sizeof(best_pole_preimages));
+        } else {
+            high = amount;
+        }
+    }
+
+    memcpy(engine->lasso_coefficients, best_coefficients, sizeof(engine->lasso_coefficients));
+    memcpy(engine->zero_preimages, best_zero_preimages, sizeof(engine->zero_preimages));
+    memcpy(engine->pole_preimages, best_pole_preimages, sizeof(engine->pole_preimages));
+    engine->dirty = true;
+
+    LOGI(
+        "lasso deformed: amount=%.4f budget=%.4f parameter=%.4g%+.4gi",
+        low,
+        lasso_derivative_budget(engine->lasso_coefficients),
+        engine->lasso_parameter[0], engine->lasso_parameter[1]
+    );
+}
+
+static void toggle_pause(struct engine *engine) {
+    engine->paused = !engine->paused;
+    engine->last_animation_time = monotonic_seconds();
+    engine->dirty = true;
+    LOGI("lasso phase walk %s", engine->paused ? "paused" : "running");
+}
+
+static void advance_phase(struct engine *engine) {
+    double now = monotonic_seconds();
+    float dt = (float)(now - engine->last_animation_time);
+    engine->last_animation_time = now;
+    if (dt <= 0.0f) return;
+    if (dt > 0.05f) dt = 0.05f;
+
+    float noise = random_signed(engine);
+    engine->phase_velocity += 1.15f * sqrtf(dt) * noise;
+    engine->phase_velocity *= expf(-0.85f * dt);
+    if (engine->phase_velocity > 1.6f) engine->phase_velocity = 1.6f;
+    if (engine->phase_velocity < -1.6f) engine->phase_velocity = -1.6f;
+
+    engine->phase += engine->phase_velocity * dt;
+    if (engine->phase >= TAU || engine->phase <= -TAU) {
+        engine->phase = fmodf(engine->phase, TAU);
+    }
+    engine->dirty = true;
+}
+
+static void clear_gesture(struct engine *engine) {
+    engine->candidate_kind = FACTOR_NONE;
+    engine->candidate_index = -1;
+    engine->dragging_factor = false;
+    engine->lasso_candidate = false;
+    engine->dragging_lasso = false;
+    engine->moved = false;
+}
+
+static float pinch_distance(AInputEvent *event) {
+    if (AMotionEvent_getPointerCount(event) < 2) return 0.0f;
+    float dx = AMotionEvent_getX(event, 1) - AMotionEvent_getX(event, 0);
+    float dy = AMotionEvent_getY(event, 1) - AMotionEvent_getY(event, 0);
     return hypotf(dx, dy);
 }
 
-static void pointer_midpoint(const AInputEvent *event, float *x, float *y) {
-    *x = 0.5f * (AMotionEvent_getX(event, 0) + AMotionEvent_getX(event, 1));
-    *y = 0.5f * (AMotionEvent_getY(event, 0) + AMotionEvent_getY(event, 1));
+static void begin_pinch(struct engine *engine, AInputEvent *event) {
+    float distance = pinch_distance(event);
+    if (distance < 8.0f) return;
+    engine->pinching = true;
+    engine->suppress_tap = true;
+    engine->pinch_start_distance = distance;
+    engine->pinch_start_zoom = engine->zoom;
+    clear_gesture(engine);
+}
+
+static void update_pinch(struct engine *engine, AInputEvent *event) {
+    if (!engine->pinching || engine->pinch_start_distance < 8.0f) return;
+    float distance = pinch_distance(event);
+    if (distance < 8.0f) return;
+
+    float zoom = engine->pinch_start_zoom * distance / engine->pinch_start_distance;
+    if (zoom < 0.5f) zoom = 0.5f;
+    if (zoom > 4.0f) zoom = 4.0f;
+    if (fabsf(zoom - engine->zoom) > 1.0e-4f) {
+        engine->zoom = zoom;
+        engine->dirty = true;
+    }
 }
 
 static int32_t handle_input(struct android_app *app, AInputEvent *event) {
     struct engine *engine = app->userData;
-    if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION) {
-        return 0;
-    }
+    if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION) return 0;
 
-    int32_t action = AMotionEvent_getAction(event);
-    int32_t masked_action = action & AMOTION_EVENT_ACTION_MASK;
+    int32_t masked_action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
     size_t pointer_count = AMotionEvent_getPointerCount(event);
 
     switch (masked_action) {
         case AMOTION_EVENT_ACTION_DOWN: {
             float x = AMotionEvent_getX(event, 0);
             float y = AMotionEvent_getY(event, 0);
-            enum factor_kind selected_kind = FACTOR_ZERO;
-            if (placement_control_hit(engine, x, y, &selected_kind)) {
-                engine->placement_kind = selected_kind;
-                set_whole_portrait_view(engine);
-                engine->gesture = GESTURE_BLOCKED;
-                engine->moved = false;
+            engine->suppress_tap = false;
+
+            if (pause_control_contains(engine, x, y)) {
+                toggle_pause(engine);
+                clear_gesture(engine);
+                engine->suppress_tap = true;
+                return 1;
+            }
+
+            enum placement_kind selected;
+            if (placement_control_hit(engine, x, y, &selected)) {
+                engine->placement_kind = selected;
                 engine->dirty = true;
+                clear_gesture(engine);
+                engine->suppress_tap = true;
+                LOGI(
+                    "placement selected: %s",
+                    selected == PLACEMENT_ZERO ? "zero" : "infinity"
+                );
                 return 1;
             }
-            if (view_button_contains(engine, x, y)) {
-                engine->gesture = GESTURE_VIEW_BUTTON;
-                engine->moved = false;
-                return 1;
-            }
-            if (clear_button_contains(engine, x, y)) {
-                engine->gesture = GESTURE_CLEAR_BUTTON;
-                engine->moved = false;
-                return 1;
-            }
-            if (polynomial_overlay_contains(engine, x, y)) {
-                engine->gesture = GESTURE_BLOCKED;
-                engine->moved = false;
-                return 1;
-            }
-            engine->gesture = GESTURE_SINGLE;
-            engine->moved = false;
+
             engine->down_x = x;
             engine->down_y = y;
-            engine->last_x = engine->down_x;
-            engine->last_y = engine->down_y;
+            nearest_factor(
+                engine, x, y, &engine->candidate_kind, &engine->candidate_index
+            );
+            engine->dragging_factor = false;
+            engine->lasso_candidate = false;
+            engine->dragging_lasso = false;
+            engine->moved = false;
+
+            if (engine->candidate_kind == FACTOR_NONE) {
+                engine->lasso_candidate = nearest_lasso_parameter(
+                    engine, x, y, engine->lasso_parameter
+                );
+                if (engine->lasso_candidate) begin_lasso_drag(engine);
+            }
             return 1;
         }
 
-        case AMOTION_EVENT_ACTION_POINTER_DOWN: {
-            if (gesture_is_ui_hold(engine->gesture)) {
-                engine->gesture = GESTURE_BLOCKED;
-                engine->moved = false;
-                return 1;
-            }
-            if (gesture_pointer_down_resets(engine->gesture, (int)pointer_count)) {
-                reset_all(engine);
-                engine->gesture = GESTURE_BLOCKED;
-                return 1;
-            }
-            if (gesture_pointer_down_starts_pinch(engine->gesture, (int)pointer_count)) {
-                engine->gesture = GESTURE_PINCH;
-                engine->moved = false;
-                engine->pinch_last_distance = pointer_distance(event);
-                pointer_midpoint(event, &engine->pinch_last_mid_x, &engine->pinch_last_mid_y);
-                return 1;
-            }
-            return 0;
-        }
+        case AMOTION_EVENT_ACTION_POINTER_DOWN:
+            if (pointer_count >= 2) begin_pinch(engine, event);
+            return 1;
 
         case AMOTION_EVENT_ACTION_MOVE: {
-            if (engine->gesture == GESTURE_SINGLE && pointer_count == 1) {
-                float x = AMotionEvent_getX(event, 0);
-                float y = AMotionEvent_getY(event, 0);
-                float from_down_x = x - engine->down_x;
-                float from_down_y = y - engine->down_y;
-                if (hypotf(from_down_x, from_down_y) > 12.0f) {
-                    engine->moved = true;
-                }
-                if (engine->moved) {
-                    pan_by_pixels(engine, x - engine->last_x, y - engine->last_y);
-                }
-                engine->last_x = x;
-                engine->last_y = y;
+            if (pointer_count >= 2) {
+                update_pinch(engine, event);
                 return 1;
             }
+            if (pointer_count != 1) return 1;
 
-            if (engine->gesture == GESTURE_PINCH && pointer_count >= 2) {
-                float midpoint_x = 0.0f;
-                float midpoint_y = 0.0f;
-                pointer_midpoint(event, &midpoint_x, &midpoint_y);
-                float distance = pointer_distance(event);
+            float x = AMotionEvent_getX(event, 0);
+            float y = AMotionEvent_getY(event, 0);
+            if (hypotf(x - engine->down_x, y - engine->down_y) > 10.0f) {
+                engine->moved = true;
+            }
 
-                pan_by_pixels(
-                    engine,
-                    midpoint_x - engine->pinch_last_mid_x,
-                    midpoint_y - engine->pinch_last_mid_y
+            if (engine->moved && engine->candidate_kind != FACTOR_NONE) {
+                engine->dragging_factor = true;
+                move_factor(
+                    engine, engine->candidate_kind, engine->candidate_index, x, y
                 );
-
-                if (distance > 1.0f && engine->pinch_last_distance > 1.0f) {
-                    engine->half_height *= engine->pinch_last_distance / distance;
-                    if (engine->half_height < 0.01f) engine->half_height = 0.01f;
-                    if (engine->half_height > 100000.0f) engine->half_height = 100000.0f;
-                    engine->dirty = true;
-                }
-
-                engine->pinch_last_distance = distance;
-                engine->pinch_last_mid_x = midpoint_x;
-                engine->pinch_last_mid_y = midpoint_y;
-                return 1;
+            } else if (engine->moved && engine->lasso_candidate) {
+                engine->dragging_lasso = true;
+                deform_lasso(engine, x, y);
             }
-            return gesture_is_ui_hold(engine->gesture) ? 1 : 0;
-        }
-
-        case AMOTION_EVENT_ACTION_POINTER_UP: {
-            if (engine->gesture == GESTURE_PINCH && pointer_count == 2) {
-                engine->gesture = GESTURE_BLOCKED;
-                return 1;
-            }
-            return gesture_is_ui_hold(engine->gesture) ? 1 : 0;
+            return 1;
         }
 
         case AMOTION_EVENT_ACTION_UP: {
-            if (engine->gesture == GESTURE_SINGLE && !engine->moved) {
-                float x = AMotionEvent_getX(event, 0);
-                float y = AMotionEvent_getY(event, 0);
-                if (engine->view_kind == VIEW_CONTINUATION) {
-                    add_continuation_center(engine, x, y);
-                } else if (engine->placement_kind == FACTOR_POLE) {
-                    add_pole(engine, x, y);
-                } else {
-                    add_zero(engine, x, y);
-                }
-            } else if (
-                engine->gesture == GESTURE_CLEAR_BUTTON &&
-                clear_button_contains(
-                    engine,
-                    AMotionEvent_getX(event, 0),
-                    AMotionEvent_getY(event, 0)
-                )
-            ) {
-                if (engine->view_kind == VIEW_CONTINUATION) {
-                    clear_continuation_path(engine);
-                    LOGI("continuation path cleared");
-                } else {
-                    clear_function(engine);
-                    LOGI("whole portrait factors cleared");
-                }
-            } else if (gesture_view_release_toggles(
-                engine->gesture,
-                view_button_contains(
-                    engine,
-                    AMotionEvent_getX(event, 0),
-                    AMotionEvent_getY(event, 0)
-                )
-            )) {
-                toggle_view(engine);
+            if (engine->suppress_tap || engine->pinching) {
+                engine->pinching = false;
+                engine->suppress_tap = false;
+                clear_gesture(engine);
+                return 1;
             }
-            engine->gesture = GESTURE_NONE;
-            engine->moved = false;
+
+            float x = AMotionEvent_getX(event, 0);
+            float y = AMotionEvent_getY(event, 0);
+            if (!engine->moved && !engine->dragging_factor && !engine->dragging_lasso) {
+                add_factor(engine, engine->placement_kind, x, y);
+            } else if (engine->dragging_factor && engine->candidate_kind != FACTOR_NONE) {
+                const char *name = engine->candidate_kind == FACTOR_ZERO ? "zero" : "infinity";
+                float (*positions)[2] = engine->candidate_kind == FACTOR_ZERO
+                    ? engine->zero_positions : engine->pole_positions;
+                LOGI(
+                    "%s moved: index=%d z=%.6g%+.6gi",
+                    name, engine->candidate_index,
+                    positions[engine->candidate_index][0],
+                    positions[engine->candidate_index][1]
+                );
+            } else if (engine->dragging_lasso) {
+                LOGI(
+                    "lasso drag finished: budget=%.4f",
+                    lasso_derivative_budget(engine->lasso_coefficients)
+                );
+            }
+            clear_gesture(engine);
             return 1;
         }
 
+        case AMOTION_EVENT_ACTION_POINTER_UP:
+            if (engine->pinching) LOGI("lasso zoom: %.3f", engine->zoom);
+            engine->pinching = false;
+            engine->suppress_tap = true;
+            clear_gesture(engine);
+            return 1;
+
         case AMOTION_EVENT_ACTION_CANCEL:
-            engine->gesture = GESTURE_NONE;
-            engine->moved = false;
+            engine->pinching = false;
+            engine->suppress_tap = false;
+            clear_gesture(engine);
             return 1;
 
         default:
@@ -1038,28 +1174,24 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
 
 static void handle_command(struct android_app *app, int32_t command) {
     struct engine *engine = app->userData;
-
     switch (command) {
         case APP_CMD_INIT_WINDOW:
             if (app->window != NULL && engine->display == EGL_NO_DISPLAY) {
                 initialize_display(engine);
             }
             break;
-
         case APP_CMD_TERM_WINDOW:
             terminate_display(engine);
             break;
-
         case APP_CMD_WINDOW_RESIZED:
         case APP_CMD_CONTENT_RECT_CHANGED:
         case APP_CMD_CONFIG_CHANGED:
             update_surface_size(engine);
             break;
-
         case APP_CMD_GAINED_FOCUS:
+            engine->last_animation_time = monotonic_seconds();
             engine->dirty = true;
             break;
-
         default:
             break;
     }
@@ -1071,11 +1203,12 @@ void android_main(struct android_app *app) {
         .display = EGL_NO_DISPLAY,
         .surface = EGL_NO_SURFACE,
         .context = EGL_NO_CONTEXT,
-        .gesture = GESTURE_NONE,
+        .candidate_kind = FACTOR_NONE,
+        .candidate_index = -1,
         .dirty = true,
         .logged_first_frame = false
     };
-    initialize_function(&engine);
+    initialize_lasso(&engine);
 
     app->userData = &engine;
     app->onAppCmd = handle_command;
@@ -1084,20 +1217,16 @@ void android_main(struct android_app *app) {
     while (true) {
         int events = 0;
         struct android_poll_source *source = NULL;
-        int timeout = engine.dirty && engine.display != EGL_NO_DISPLAY ? 0 : -1;
+        bool can_animate = engine.display != EGL_NO_DISPLAY && !engine.paused;
+        int timeout = can_animate ? 16 : (engine.dirty ? 0 : -1);
         int ident = ALooper_pollOnce(timeout, NULL, &events, (void **)&source);
 
-        if (ident >= 0 && source != NULL) {
-            source->process(app, source);
-        }
-
+        if (ident >= 0 && source != NULL) source->process(app, source);
         if (app->destroyRequested != 0) {
             terminate_display(&engine);
             return;
         }
-
-        if (engine.dirty) {
-            draw_frame(&engine);
-        }
+        if (engine.display != EGL_NO_DISPLAY && !engine.paused) advance_phase(&engine);
+        if (engine.dirty) draw_frame(&engine);
     }
 }
