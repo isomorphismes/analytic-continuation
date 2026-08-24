@@ -250,21 +250,12 @@ void main() {
 
     float placement_radius = clamp(0.048 * min(u_resolution.x, u_resolution.y), 26.0, 38.0);
     vec2 zero_center = vec2(placement_radius + 16.0, placement_radius + 16.0);
-    vec2 infinity_center = zero_center + vec2(2.0 * placement_radius + 14.0, 0.0);
-
     bool zero_selected = u_placement_kind == 0;
-    bool infinity_selected = u_placement_kind == 1;
     float zero_disk = circle_mask(gl_FragCoord.xy, zero_center, placement_radius);
-    float infinity_disk = circle_mask(gl_FragCoord.xy, infinity_center, placement_radius);
     color = mix(
         color,
         zero_selected ? vec3(0.94) : vec3(0.04),
         zero_disk * 0.86
-    );
-    color = mix(
-        color,
-        infinity_selected ? vec3(0.94) : vec3(0.04),
-        infinity_disk * 0.86
     );
 
     vec3 zero_mark_color = zero_selected ? vec3(0.05) : vec3(0.96);
@@ -275,25 +266,6 @@ void main() {
         placement_radius * 0.25
     );
     color = mix(color, zero_mark_color, zero_mark);
-
-    vec3 infinity_mark_color = infinity_selected ? vec3(0.05) : vec3(0.96);
-    float loop_radius = placement_radius * 0.27;
-    float loop_offset = placement_radius * 0.20;
-    float infinity_mark = max(
-        ring_mask(
-            gl_FragCoord.xy,
-            infinity_center - vec2(loop_offset, 0.0),
-            loop_radius,
-            loop_radius * 0.58
-        ),
-        ring_mask(
-            gl_FragCoord.xy,
-            infinity_center + vec2(loop_offset, 0.0),
-            loop_radius,
-            loop_radius * 0.58
-        )
-    );
-    color = mix(color, infinity_mark_color, infinity_mark);
 
     frag_color = vec4(color, 1.0);
 }
