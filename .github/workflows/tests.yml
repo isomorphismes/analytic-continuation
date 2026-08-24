@@ -9,6 +9,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check out Wegert coloring oracle
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/wegert
+          ref: feature/coloring-core
+          path: .wegert-upstream
+      - name: Reject cross-repository coloring drift
+        run: >-
+          cmp
+          android/app/src/main/assets/wegert_color.glsl
+          .wegert-upstream/app/src/main/assets/wegert_color.glsl
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
