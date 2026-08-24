@@ -54,13 +54,13 @@ jobs:
           grep -Fq 'PLACEMENT_INFINITY' android/app/src/main/cpp/analytic_continuation.c
           grep -Fq 'engine->zoom' android/app/src/main/cpp/analytic_continuation.c
           grep -Fq 'AMOTION_EVENT_ACTION_POINTER_DOWN' android/app/src/main/cpp/analytic_continuation.c
-          grep -Fq 'u_pole_count' android/app/src/main/assets/continuation.frag
-          grep -Fq 'u_placement_kind' android/app/src/main/assets/continuation.frag
-          grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag
-          grep -Fq 'vec3 hcl_to_srgb' android/app/src/main/assets/continuation.frag
-          grep -Fq 'vec3 color = hcl_to_srgb(hue_degrees, 45.0, lightness);' android/app/src/main/assets/continuation.frag
+          grep -Fq 'u_pole_count' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'u_placement_kind' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'vec3 wegert_hcl_to_srgb' android/app/src/main/assets/wegert_color.glsl
+          grep -Fq 'vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);' android/app/src/main/assets/continuation.frag.in
           ! grep -Fq 'close_control_contains' android/app/src/main/cpp/analytic_continuation.c
-          ! grep -Fq 'close_center' android/app/src/main/assets/continuation.frag
+          ! grep -Fq 'close_center' android/app/src/main/assets/continuation.frag.in
           ! grep -Fq 'ANativeActivity_finish' android/app/src/main/cpp/analytic_continuation.c
 
       - name: Build lasso APK
