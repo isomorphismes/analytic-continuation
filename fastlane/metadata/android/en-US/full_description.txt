@@ -1,0 +1,5 @@
+Analytic Continuation is a native Android explorer for complex functions and convergence-disc geometry.
+
+The live view uses GPU-rendered phase portraits. You can place and move zeros and poles, inspect overlapping convergence discs, and explore how known singularities constrain the radius around each center.
+
+The Android explorer runs natively on the device. The repository also contains a separate desktop movie-rendering path, but that Python and ManimGL tooling is not part of the Android F-Droid build.
