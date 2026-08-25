@@ -25,8 +25,8 @@ class ReleaseUiContractTests(unittest.TestCase):
         self.assertIn("nearest_factor(", native)
         self.assertIn("factor drag selected: %s index=%d", native)
         self.assertIn("move_factor(", native)
-        self.assertIn('"zero moved: index=%d z=%.6g%+.6gi"', native)
-        self.assertIn('"pole moved: index=%d z=%.6g%+.6gi"', native)
+        self.assertIn('engine->candidate_kind == FACTOR_ZERO ? "zero" : "pole"', native)
+        self.assertIn('"%s moved: index=%d z=%.6g%+.6gi"', native)
 
     def test_exit_control_is_drawn_and_finishes_activity(self) -> None:
         shader = SHADER.read_text()
@@ -49,10 +49,10 @@ class ReleaseUiContractTests(unittest.TestCase):
         self.assertIn("int superscript_scale = scale > 1 ? scale - 1 : 1;", overlay)
         self.assertIn("int superscript_y = y - 2 * scale;", overlay)
         self.assertIn("if (cursor[index] == '^')", overlay)
-        # The caret is an internal layout marker; this branch consumes it and
-        # renders only the raised exponent digits.
         superscript_branch = overlay.split("if (cursor[index] == '^')", 1)[1].split("continue;", 1)[0]
-        self.assertNotIn("overlay_draw_glyph", superscript_branch.split("index += 1;", 1)[0])
+        marker_advance = superscript_branch.index("index += 1;")
+        digit_draw = superscript_branch.index("overlay_draw_glyph")
+        self.assertLess(marker_advance, digit_draw)
 
     def test_release_version_is_0_2_2_code_4_everywhere(self) -> None:
         gradle = GRADLE.read_text()
