@@ -13,8 +13,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: isomorphisms/wegert
-          ref: feature/coloring-core
+          ref: main
           path: .wegert-upstream
+          persist-credentials: false
       - name: Reject cross-repository coloring drift
         run: >-
           cmp
@@ -26,3 +27,12 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e .
       - run: python -m unittest discover -s tests -v
+      - name: Smoke-test three holomorphic workers
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Iandroid/app/src/main/cpp \
+            tests/test_holomorphic_walk.c \
+            android/app/src/main/cpp/holomorphic_walk.c \
+            -pthread -lm \
+            -o /tmp/test-holomorphic-walk
+          /tmp/test-holomorphic-walk

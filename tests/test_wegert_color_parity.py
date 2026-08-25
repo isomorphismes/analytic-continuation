@@ -140,7 +140,6 @@ class WegertColorParityTests(unittest.TestCase):
             "length(z - u_zero_positions[index])",
             "length(z - u_pole_positions[index])",
             "bool zero_selected = u_placement_kind == 0;",
-            "bool infinity_selected = u_placement_kind == 1;",
         )
         for token in overlay_tokens:
             with self.subTest(token=token):

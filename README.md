@@ -198,6 +198,10 @@ equation with initial data, or a Taylor germ.
 
 ## Later: computing continuation rather than visualizing its geometry
 
+The intended rigidity interaction, famous-function cards, and proof-bearing
+meanings of `almost` and `near` are specified in
+[`docs/rigidity.md`](docs/rigidity.md).
+
 A continuation computation needs more data than the current disc view:
 
 1. a base point and a Taylor germ (or an equation that determines one),

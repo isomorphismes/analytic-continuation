@@ -29,15 +29,6 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - name: Check out Grease source
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          repository: isomorphisms/grease
-          ref: e963958976eaa80a2517bae3fd34b0e5115ffcbe
-          path: .grease
-          submodules: recursive
-          persist-credentials: false
-
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
@@ -48,20 +39,19 @@ jobs:
       - name: Install native Android toolchain
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
-      - name: Verify intended lasso interaction is wired
+      - name: Verify random holomorphic interaction is wired
         run: |
-          grep -Fq 'engine->zero_count = 1;' android/app/src/main/cpp/analytic_continuation.c
-          grep -Fq 'PLACEMENT_INFINITY' android/app/src/main/cpp/analytic_continuation.c
-          grep -Fq 'engine->zoom' android/app/src/main/cpp/analytic_continuation.c
-          grep -Fq 'AMOTION_EVENT_ACTION_POINTER_DOWN' android/app/src/main/cpp/analytic_continuation.c
-          grep -Fq 'u_pole_count' android/app/src/main/assets/continuation.frag.in
+          grep -Fq '#define HOLOMORPHIC_WALK_WORKER_COUNT 3' android/app/src/main/cpp/holomorphic_walk.h
+          grep -Fq '#define SEARCH_CANDIDATES 128' android/app/src/main/cpp/holomorphic_walk.c
+          grep -Fq 'holomorphic_walk_best_direction' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'add_factor(engine, PLACEMENT_ZERO, x, y);' android/app/src/main/cpp/analytic_continuation_random.c
+          ! grep -Fq 'add_factor(engine, PLACEMENT_INFINITY' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'holomorphic walk started with %d workers' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'deformation_accepted_steps' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'u_placement_kind' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'vec3 wegert_hcl_to_srgb' android/app/src/main/assets/wegert_color.glsl
           grep -Fq 'vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);' android/app/src/main/assets/continuation.frag.in
-          ! grep -Fq 'close_control_contains' android/app/src/main/cpp/analytic_continuation.c
-          ! grep -Fq 'close_center' android/app/src/main/assets/continuation.frag.in
-          ! grep -Fq 'ANativeActivity_finish' android/app/src/main/cpp/analytic_continuation.c
 
       - name: Build lasso APK
         working-directory: android
@@ -88,15 +78,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Check out Grease source
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          repository: isomorphisms/grease
-          ref: e963958976eaa80a2517bae3fd34b0e5115ffcbe
-          path: .grease
-          submodules: recursive
-          persist-credentials: false
-
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
@@ -113,7 +94,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Launch, pause, deform, and place zero and infinity
+      - name: Launch, pause, deform, add a zero, and resume
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -128,17 +109,19 @@ jobs:
             adb shell settings put secure immersive_mode_confirmations confirmed
             adb logcat -c
             adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
-            sleep 3
+            sleep 4
             adb logcat -d > lasso-emulator.log
+            grep -Fq 'holomorphic walk started with 3 workers' lasso-emulator.log
             grep -Fq 'lasso ready:' lasso-emulator.log
-            grep -Fq 'zeros=1 poles=0 placement=zero' lasso-emulator.log
+            grep -Fq 'zeros=1 poles=1 placement=zero' lasso-emulator.log
             grep -Fq 'outside=domain-coloring' lasso-emulator.log
             grep -Fq 'lasso first frame:' lasso-emulator.log
+            steps_before=$(sed -n 's/.*holomorphic walk: workers=3 steps=\([0-9][0-9]*\).*/\1/p' lasso-emulator.log | tail -1); test -n "$steps_before"; test "$steps_before" -gt 0; printf '%s\n' "$steps_before" > /tmp/holomorphic-steps-before
 
             set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; control_radius=$((52 * min_side / 1000)); if [ "$control_radius" -lt 28 ]; then control_radius=28; fi; if [ "$control_radius" -gt 42 ]; then control_radius=42; fi; adb shell input tap "$((control_radius + 16))" "$((control_radius + 16))"
             sleep 1
             adb logcat -d > lasso-emulator.log
-            grep -Fq 'lasso phase walk paused' lasso-emulator.log
+            grep -Fq 'holomorphic walk paused' lasso-emulator.log
 
             set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); center_x=$((width / 2)); center_y=$((height / 2)); offset=$((707 * lasso_radius / 1000)); start_x=$((center_x + offset)); start_y=$((center_y - offset)); end_x=$((start_x + 50)); end_y=$((start_y - 50)); adb shell input swipe "$start_x" "$start_y" "$end_x" "$end_y" 500
             sleep 1
@@ -149,23 +132,22 @@ jobs:
             set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; placement_radius=$((48 * min_side / 1000)); if [ "$placement_radius" -lt 26 ]; then placement_radius=26; fi; if [ "$placement_radius" -gt 38 ]; then placement_radius=38; fi; adb shell input tap "$((placement_radius + 16))" "$((height - placement_radius - 16))"
             sleep 1
             adb logcat -d > lasso-emulator.log
-            grep -Fq 'placement selected: zero' lasso-emulator.log
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); adb shell input tap "$((width / 2 + lasso_radius / 3))" "$((height / 2))"
+            grep -Fq 'zero placement active' lasso-emulator.log
+            ! grep -Fq 'placement selected: infinity' lasso-emulator.log
+
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); adb shell input tap "$((width / 2 + lasso_radius / 2))" "$((height / 2 + lasso_radius / 4))"
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'zero added:' lasso-emulator.log
             grep -Fq 'count=2' lasso-emulator.log
 
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; placement_radius=$((48 * min_side / 1000)); if [ "$placement_radius" -lt 26 ]; then placement_radius=26; fi; if [ "$placement_radius" -gt 38 ]; then placement_radius=38; fi; zero_x=$((placement_radius + 16)); infinity_x=$((zero_x + 2 * placement_radius + 14)); adb shell input tap "$infinity_x" "$((height - placement_radius - 16))"
-            sleep 1
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; control_radius=$((52 * min_side / 1000)); if [ "$control_radius" -lt 28 ]; then control_radius=28; fi; if [ "$control_radius" -gt 42 ]; then control_radius=42; fi; adb shell input tap "$((control_radius + 16))" "$((control_radius + 16))"
+            sleep 3
             adb logcat -d > lasso-emulator.log
-            grep -Fq 'placement selected: infinity' lasso-emulator.log
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); adb shell input tap "$((width / 2))" "$((height / 2 + lasso_radius / 3))"
-            sleep 1
-            adb logcat -d > lasso-emulator.log
-            grep -Fq 'infinity added:' lasso-emulator.log
-            grep -Fq 'count=1' lasso-emulator.log
-            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable' lasso-emulator.log
+            grep -Fq 'holomorphic walk running' lasso-emulator.log
+            steps_before=$(cat /tmp/holomorphic-steps-before); steps_after=$(sed -n 's/.*holomorphic walk: workers=3 steps=\([0-9][0-9]*\).*/\1/p' lasso-emulator.log | tail -1); test -n "$steps_after"; test "$steps_after" -gt "$steps_before"
+            grep -Eq 'holomorphic walk: workers=3 steps=[0-9]+ .*zeros=2 poles=1' lasso-emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable|FATAL EXCEPTION' lasso-emulator.log
             adb exec-out screencap -p > lasso-emulator.png
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
