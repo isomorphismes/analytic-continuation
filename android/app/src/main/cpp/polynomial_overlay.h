@@ -196,6 +196,8 @@ static void overlay_format_polynomial(
         if (power > 0) {
             overlay_append(output, capacity, &used, "z");
             if (power > 1) {
+                // '^' is an internal layout marker. It is never drawn; the
+                // following digits are rasterized smaller and raised.
                 overlay_append(output, capacity, &used, "^%d", power);
             }
         }
@@ -208,11 +210,39 @@ static void overlay_format_polynomial(
     }
 }
 
+static void overlay_append_factor(
+    char *output,
+    size_t capacity,
+    size_t *used,
+    const float root[2]
+) {
+    double real = round((double)root[0]);
+    double imag = round((double)root[1]);
+    char number[64];
+
+    overlay_append(output, capacity, used, "(z");
+
+    if (!overlay_near_zero(real)) {
+        overlay_format_number(fabs(real), number, sizeof(number));
+        overlay_append(output, capacity, used, real > 0.0 ? "-%s" : "+%s", number);
+    }
+
+    if (!overlay_near_zero(imag)) {
+        double magnitude = fabs(imag);
+        overlay_append(output, capacity, used, imag > 0.0 ? "-" : "+");
+        if (!overlay_near_one(magnitude)) {
+            overlay_format_number(magnitude, number, sizeof(number));
+            overlay_append(output, capacity, used, "%s", number);
+        }
+        overlay_append(output, capacity, used, "i");
+    }
+
+    overlay_append(output, capacity, used, ")");
+}
+
 static void polynomial_overlay_format_function(const struct engine *engine, char *output, size_t capacity) {
     struct overlay_complex numerator_coefficients[MAX_FACTORS + 1];
-    struct overlay_complex denominator_coefficients[MAX_FACTORS + 1];
     char numerator[2048];
-    char denominator[2048];
 
     overlay_expand_roots(engine->zeros, engine->zero_count, numerator_coefficients);
     overlay_format_polynomial(numerator_coefficients, engine->zero_count, numerator, sizeof(numerator));
@@ -222,9 +252,13 @@ static void polynomial_overlay_format_function(const struct engine *engine, char
         return;
     }
 
-    overlay_expand_roots(engine->poles, engine->pole_count, denominator_coefficients);
-    overlay_format_polynomial(denominator_coefficients, engine->pole_count, denominator, sizeof(denominator));
-    snprintf(output, capacity, "(%s) / (%s)", numerator, denominator);
+    size_t used = 0u;
+    output[0] = '\0';
+    overlay_append(output, capacity, &used, "(%s)", numerator);
+    for (int index = 0; index < engine->pole_count; ++index) {
+        overlay_append(output, capacity, &used, " ÷");
+        overlay_append_factor(output, capacity, &used, engine->poles[index]);
+    }
 }
 
 static int overlay_max_digit_run(const char *text) {
@@ -241,7 +275,19 @@ static int overlay_max_digit_run(const char *text) {
     return maximum;
 }
 
-static uint8_t overlay_glyph_row(char character, int row) {
+static int overlay_decode_glyph(const char *text, uint32_t *glyph) {
+    const unsigned char first = (unsigned char)text[0];
+    const unsigned char second = (unsigned char)text[1];
+    if (first == 0xc3u && second == 0xb7u) {
+        *glyph = 0x00f7u;
+        return 2;
+    }
+
+    *glyph = (uint32_t)first;
+    return 1;
+}
+
+static uint8_t overlay_glyph_row(uint32_t character, int row) {
     static const uint8_t digits[10][7] = {
         {0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e},
         {0x04, 0x0c, 0x14, 0x04, 0x04, 0x04, 0x1f},
@@ -290,6 +336,7 @@ static uint8_t overlay_glyph_row(char character, int row) {
         case ':': { static const uint8_t glyph[7] = {0x00,0x0c,0x0c,0x00,0x0c,0x0c,0x00}; return glyph[row]; }
         case '^': { static const uint8_t glyph[7] = {0x04,0x0a,0x11,0x00,0x00,0x00,0x00}; return glyph[row]; }
         case '/': { static const uint8_t glyph[7] = {0x01,0x02,0x04,0x04,0x08,0x10,0x00}; return glyph[row]; }
+        case 0x00f7u: { static const uint8_t glyph[7] = {0x04,0x00,0x00,0x1f,0x00,0x00,0x04}; return glyph[row]; }
         default: return 0x00;
     }
 }
@@ -322,7 +369,7 @@ static void overlay_draw_glyph(
     int x,
     int y,
     int scale,
-    char character
+    uint32_t character
 ) {
     for (int row = 0; row < 7; ++row) {
         uint8_t bits = overlay_glyph_row(character, row);
@@ -358,20 +405,23 @@ static int overlay_measure_wrapped_lines(const char *text, int max_columns) {
         while (*cursor == ' ') cursor += 1;
         if (*cursor == '\0') break;
 
-        int word_length = 0;
-        while (cursor[word_length] != '\0' && cursor[word_length] != ' ') {
-            word_length += 1;
+        int word_bytes = 0;
+        int word_columns = 0;
+        while (cursor[word_bytes] != '\0' && cursor[word_bytes] != ' ') {
+            uint32_t glyph = 0u;
+            word_bytes += overlay_decode_glyph(cursor + word_bytes, &glyph);
+            word_columns += 1;
         }
 
         if (column == 0) {
-            column = word_length;
-        } else if (column + 1 + word_length <= max_columns) {
-            column += 1 + word_length;
+            column = word_columns;
+        } else if (column + 1 + word_columns <= max_columns) {
+            column += 1 + word_columns;
         } else {
             lines += 1;
-            column = word_length;
+            column = word_columns;
         }
-        cursor += word_length;
+        cursor += word_bytes;
     }
 
     return lines;
@@ -397,12 +447,15 @@ static void overlay_draw_wrapped_text(
         while (*cursor == ' ') cursor += 1;
         if (*cursor == '\0') break;
 
-        int word_length = 0;
-        while (cursor[word_length] != '\0' && cursor[word_length] != ' ') {
-            word_length += 1;
+        int word_bytes = 0;
+        int word_columns = 0;
+        while (cursor[word_bytes] != '\0' && cursor[word_bytes] != ' ') {
+            uint32_t glyph = 0u;
+            word_bytes += overlay_decode_glyph(cursor + word_bytes, &glyph);
+            word_columns += 1;
         }
 
-        if (column != 0 && column + 1 + word_length <= max_columns) {
+        if (column != 0 && column + 1 + word_columns <= max_columns) {
             x += character_advance;
             column += 1;
         } else if (column != 0) {
@@ -411,14 +464,15 @@ static void overlay_draw_wrapped_text(
             column = 0;
         }
 
-        for (int index = 0; index < word_length; ++index) {
+        int index = 0;
+        while (index < word_bytes) {
             if (cursor[index] == '^') {
                 int superscript_scale = scale > 1 ? scale - 1 : 1;
                 int superscript_y = y - 2 * scale;
                 column += 1;
                 index += 1;
                 while (
-                    index < word_length &&
+                    index < word_bytes &&
                     cursor[index] >= '0' &&
                     cursor[index] <= '9'
                 ) {
@@ -429,22 +483,24 @@ static void overlay_draw_wrapped_text(
                         x,
                         superscript_y,
                         superscript_scale,
-                        cursor[index]
+                        (uint32_t)(unsigned char)cursor[index]
                     );
                     x += 6 * superscript_scale;
                     column += 1;
                     index += 1;
                 }
-                index -= 1;
                 continue;
             }
 
-            overlay_draw_glyph(pixels, width, height, x, y, scale, cursor[index]);
+            uint32_t glyph = 0u;
+            int glyph_bytes = overlay_decode_glyph(cursor + index, &glyph);
+            overlay_draw_glyph(pixels, width, height, x, y, scale, glyph);
             x += character_advance;
             column += 1;
+            index += glyph_bytes;
         }
 
-        cursor += word_length;
+        cursor += word_bytes;
     }
 }
 
@@ -570,7 +626,15 @@ static bool overlay_rebuild_button_texture(
     int x = (width - label_width) / 2;
     int y = (height - 7 * scale) / 2;
     for (int index = 0; label[index] != '\0'; ++index) {
-        overlay_draw_glyph(pixels, width, height, x, y, scale, label[index]);
+        overlay_draw_glyph(
+            pixels,
+            width,
+            height,
+            x,
+            y,
+            scale,
+            (uint32_t)(unsigned char)label[index]
+        );
         x += 6 * scale;
     }
 
@@ -597,7 +661,7 @@ static bool clear_button_rebuild_texture(struct engine *engine) {
 
 static bool view_button_rebuild_texture(struct engine *engine) {
     const char *label = engine->view_kind == VIEW_CONTINUATION
-        ? "edit zero / infinity"
+        ? "edit O / X"
         : "convergence discs";
     bool rebuilt = overlay_rebuild_button_texture(
         engine,
