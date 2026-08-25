@@ -35,7 +35,10 @@ public final class ExplorerActivity extends NativeActivity {
         );
         addContentView(formula, layout);
 
-        if (BuildConfig.DEBUG && getIntent().getBooleanExtra(CI_TOUCH_SELF_TEST, false)) {
+        if (
+            getPackageName().endsWith(".lasso.dev") &&
+            getIntent().getBooleanExtra(CI_TOUCH_SELF_TEST, false)
+        ) {
             View decor = getWindow().getDecorView();
             decor.postDelayed(() -> runCiTouchSelfTest(decor), 1800L);
         }
