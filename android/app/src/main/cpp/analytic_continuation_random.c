@@ -45,6 +45,13 @@ static bool zero_control_contains(const struct engine *engine, float x, float y)
     return hypotf(x - center_x, y - center_y) <= radius;
 }
 
+static bool exit_control_contains(const struct engine *engine, float x, float y) {
+    float radius = control_radius(engine);
+    float center_x = (float)engine->width - radius - 16.0f;
+    float center_y = (float)engine->height - radius - 16.0f;
+    return hypotf(x - center_x, y - center_y) <= radius;
+}
+
 static void toggle_holomorphic_pause(struct engine *engine) {
     engine->paused = !engine->paused;
     deformation_last_time = monotonic_seconds();
@@ -174,6 +181,14 @@ static int32_t handle_zero_only_input(struct android_app *app, AInputEvent *even
                 return 1;
             }
 
+            if (exit_control_contains(engine, x, y)) {
+                LOGI("exit requested");
+                clear_gesture(engine);
+                engine->suppress_tap = true;
+                ANativeActivity_finish(engine->app->activity);
+                return 1;
+            }
+
             if (zero_control_contains(engine, x, y)) {
                 clear_gesture(engine);
                 engine->suppress_tap = true;
@@ -191,7 +206,13 @@ static int32_t handle_zero_only_input(struct android_app *app, AInputEvent *even
             engine->dragging_lasso = false;
             engine->moved = false;
 
-            if (engine->candidate_kind == FACTOR_NONE) {
+            if (engine->candidate_kind != FACTOR_NONE) {
+                LOGI(
+                    "factor drag selected: %s index=%d",
+                    engine->candidate_kind == FACTOR_ZERO ? "zero" : "pole",
+                    engine->candidate_index
+                );
+            } else {
                 engine->lasso_candidate = nearest_lasso_parameter(
                     engine, x, y, engine->lasso_parameter
                 );
@@ -248,7 +269,7 @@ static int32_t handle_zero_only_input(struct android_app *app, AInputEvent *even
             if (!engine->moved && !engine->dragging_factor && !engine->dragging_lasso) {
                 add_factor(engine, PLACEMENT_ZERO, x, y);
             } else if (engine->dragging_factor && engine->candidate_kind != FACTOR_NONE) {
-                const char *name = engine->candidate_kind == FACTOR_ZERO ? "zero" : "infinity";
+                const char *name = engine->candidate_kind == FACTOR_ZERO ? "zero" : "pole";
                 float (*positions)[2] = engine->candidate_kind == FACTOR_ZERO
                     ? engine->zero_positions : engine->pole_positions;
                 LOGI(
@@ -273,6 +294,9 @@ static int32_t handle_zero_only_input(struct android_app *app, AInputEvent *even
         }
 
         case AMOTION_EVENT_ACTION_POINTER_UP:
+            if (engine->pinching) {
+                LOGI("lasso zoom: %.3f", engine->zoom);
+            }
             engine->pinching = false;
             engine->suppress_tap = true;
             clear_gesture(engine);
