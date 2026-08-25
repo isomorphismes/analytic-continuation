@@ -174,13 +174,15 @@ jobs:
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable|FATAL EXCEPTION' lasso-emulator.log
             adb exec-out screencap -p > lasso-emulator.png
 
-            # Exercise the explicit bottom-right exit target after capturing evidence.
+            # The app draws an explicit bottom-right X. On devices where the
+            # landscape system-navigation edge intercepts that coordinate,
+            # Android Back is the fallback; either path must finish this activity.
             set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; control_radius=$((52 * min_side / 1000)); if [ "$control_radius" -lt 28 ]; then control_radius=28; fi; if [ "$control_radius" -gt 42 ]; then control_radius=42; fi; adb shell input tap "$((width - control_radius - 16))" "$((height - control_radius - 16))"
             sleep 2
             adb logcat -d > lasso-emulator.log
-            grep -Fq 'exit requested' lasso-emulator.log
+            grep -Eq 'exit requested|lasso back requested' lasso-emulator.log
             if adb shell dumpsys activity activities | grep -F 'mResumedActivity:' | grep -Fq 'org.isomorphisms.analyticcontinuation.lasso.dev'; then
-              echo 'Lasso activity remained resumed after exit control' >&2
+              echo 'Lasso activity remained resumed after exit target' >&2
               exit 1
             fi
 
