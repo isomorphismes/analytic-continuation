@@ -137,6 +137,7 @@ jobs:
         with:
           name: analytic-continuation-fdroid-runtime-evidence
           path: |
+            artifacts/app-release-runtime-test.apk
             fdroid-release-emulator.log
             fdroid-release-package.txt
             fdroid-release-emulator.png
