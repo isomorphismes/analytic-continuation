@@ -38,6 +38,31 @@ if (sideloadSigningAvailable && !sideloadKeystoreFile.exists()) {
     )
 }
 
+val wegertColorMarker = "/*__WEGERT_COLOR_CORE__*/"
+val generatedWegertAssets = layout.buildDirectory.dir("generated/wegert-assets")
+val assembleContinuationShader = tasks.register("assembleContinuationShader") {
+    val template = file("src/main/assets/continuation.frag.in")
+    val colorCore = file("src/main/assets/wegert_color.glsl")
+    val output = generatedWegertAssets.map { it.file("continuation.frag") }
+
+    inputs.files(template, colorCore)
+    outputs.file(output)
+
+    doLast {
+        val templateText = template.readText()
+        check(templateText.contains(wegertColorMarker)) {
+            "Continuation fragment template is missing the Wegert coloring-core marker"
+        }
+        check(templateText.indexOf(wegertColorMarker) == templateText.lastIndexOf(wegertColorMarker)) {
+            "Continuation fragment template must contain exactly one Wegert coloring-core marker"
+        }
+
+        val outputFile = output.get().asFile
+        outputFile.parentFile.mkdirs()
+        outputFile.writeText(templateText.replace(wegertColorMarker, colorCore.readText()))
+    }
+}
+
 android {
     namespace = "org.isomorphisms.analyticcontinuation"
     compileSdk = 36
@@ -103,10 +128,22 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("main") {
+            // AGP source sets cannot consume Provider objects directly; the
+            // explicit preBuild dependency below preserves generation order.
+            assets.srcDir(generatedWegertAssets.get().asFile)
+        }
+    }
+
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
     }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(assembleContinuationShader)
 }

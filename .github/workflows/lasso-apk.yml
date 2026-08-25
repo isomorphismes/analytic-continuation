@@ -48,9 +48,10 @@ jobs:
           ! grep -Fq 'add_factor(engine, PLACEMENT_INFINITY' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'holomorphic walk started with %d workers' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'deformation_accepted_steps' android/app/src/main/cpp/analytic_continuation_random.c
-          grep -Fq 'u_placement_kind' android/app/src/main/assets/continuation.frag
-          grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag
-          grep -Fq 'vec3 hcl_to_srgb' android/app/src/main/assets/continuation.frag
+          grep -Fq 'u_placement_kind' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'vec3 wegert_hcl_to_srgb' android/app/src/main/assets/wegert_color.glsl
+          grep -Fq 'vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);' android/app/src/main/assets/continuation.frag.in
 
       - name: Build lasso APK
         working-directory: android
