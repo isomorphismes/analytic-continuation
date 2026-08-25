@@ -47,8 +47,9 @@ static bool zero_control_contains(const struct engine *engine, float x, float y)
 
 static bool exit_control_contains(const struct engine *engine, float x, float y) {
     float radius = control_radius(engine);
-    float center_x = (float)engine->width - radius - 16.0f;
-    float center_y = (float)engine->height - radius - 16.0f;
+    float inset = 4.0f * radius + 16.0f;
+    float center_x = (float)engine->width - inset;
+    float center_y = (float)engine->height - inset;
     return hypotf(x - center_x, y - center_y) <= radius;
 }
 
