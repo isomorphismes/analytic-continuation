@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SHADER = ROOT / "android" / "app" / "src" / "main" / "assets" / "continuation.frag.in"
 RANDOM_NATIVE = ROOT / "android" / "app" / "src" / "main" / "cpp" / "analytic_continuation_random.c"
 OVERLAY = ROOT / "android" / "app" / "src" / "main" / "cpp" / "polynomial_overlay.h"
+ACTIVITY = ROOT / "android" / "app" / "src" / "main" / "java" / "org" / "isomorphisms" / "analyticcontinuation" / "ExplorerActivity.java"
 GRADLE = ROOT / "android" / "app" / "build.gradle.kts"
 FDROID = ROOT / "fdroid" / "org.isomorphisms.analyticcontinuation.yml.template"
 
@@ -31,19 +32,32 @@ class ReleaseUiContractTests(unittest.TestCase):
     def test_exit_control_is_drawn_and_finishes_activity(self) -> None:
         shader = SHADER.read_text()
         native = RANDOM_NATIVE.read_text()
-        self.assertIn("vec2 exit_center", shader)
+        self.assertIn("float exit_inset = 4.0 * pause_radius + 16.0;", shader)
         self.assertIn("float exit_mark = max(", shader)
+        self.assertIn("float inset = 4.0f * radius + 16.0f;", native)
         self.assertIn("exit_control_contains", native)
         self.assertIn("ANativeActivity_finish(engine->app->activity);", native)
 
-    def test_overlay_uses_division_glyph_not_fraction_slash(self) -> None:
+    def test_visible_formula_overlay_uses_division_and_superscripts(self) -> None:
+        activity = ACTIVITY.read_text()
+        self.assertIn("FormulaOverlayView formula = new FormulaOverlayView(this);", activity)
+        self.assertIn('"w = φ⁻¹(z)"', activity)
+        self.assertIn('"φ(w) = w + c₂w² + c₃w³ + c₄w⁴ + c₅w⁵ + c₆w⁶"', activity)
+        self.assertIn('"f(z) = eⁱᵗ (∏ᵢ B(aᵢ,w)) ÷ (∏ⱼ B(pⱼ,w))"', activity)
+        self.assertIn('"B(a,w) = (w−a) ÷ (1−āw)"', activity)
+        self.assertNotIn("^2", activity)
+        self.assertNotIn(" / ", activity)
+        self.assertIn("public boolean onTouchEvent(MotionEvent event)", activity)
+        self.assertIn("return false;", activity)
+
+    def test_retained_bitmap_formatter_uses_division_glyph_not_fraction_slash(self) -> None:
         overlay = OVERLAY.read_text()
         self.assertIn('overlay_append(output, capacity, &used, " ÷");', overlay)
         self.assertIn("case 0x00f7u:", overlay)
         self.assertIn("overlay_decode_glyph", overlay)
         self.assertNotIn('snprintf(output, capacity, "(%s) / (%s)"', overlay)
 
-    def test_polynomial_powers_are_drawn_as_superscripts(self) -> None:
+    def test_retained_bitmap_formatter_draws_powers_as_superscripts(self) -> None:
         overlay = OVERLAY.read_text()
         self.assertIn('overlay_append(output, capacity, &used, "^%d", power);', overlay)
         self.assertIn("int superscript_scale = scale > 1 ? scale - 1 : 1;", overlay)
