@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Log;
@@ -16,32 +17,45 @@ import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.FrameLayout;
+import android.widget.PopupWindow;
 
 /** Hosts the native EGL/OpenGL ES lasso explorer. */
 public final class ExplorerActivity extends NativeActivity {
     private static final String LOG_TAG = "AnalyticContinuation";
     private static final String CI_TOUCH_SELF_TEST = "ci_touch_self_test";
 
+    private PopupWindow formulaPopup;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        FormulaOverlayView formula = new FormulaOverlayView(this);
-        FrameLayout.LayoutParams layout = new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(112),
-            Gravity.TOP
-        );
-        addContentView(formula, layout);
+        View decor = getWindow().getDecorView();
+        decor.post(() -> showFormulaOverlay(decor));
 
         if (
             getPackageName().endsWith(".lasso.dev") &&
             getIntent().getBooleanExtra(CI_TOUCH_SELF_TEST, false)
         ) {
-            View decor = getWindow().getDecorView();
             decor.postDelayed(() -> runCiTouchSelfTest(decor), 1800L);
         }
+    }
+
+    private void showFormulaOverlay(View anchor) {
+        FormulaOverlayView formula = new FormulaOverlayView(this);
+        formulaPopup = new PopupWindow(
+            formula,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(112),
+            false
+        );
+        formulaPopup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        formulaPopup.setTouchable(false);
+        formulaPopup.setFocusable(false);
+        formulaPopup.setOutsideTouchable(false);
+        formulaPopup.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
+        formulaPopup.showAtLocation(anchor, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 0);
+        Log.i(LOG_TAG, "formula overlay shown");
     }
 
     private int dp(float value) {
@@ -56,6 +70,15 @@ public final class ExplorerActivity extends NativeActivity {
     public void onBackPressed() {
         Log.i(LOG_TAG, "lasso back requested");
         finish();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (formulaPopup != null) {
+            formulaPopup.dismiss();
+            formulaPopup = null;
+        }
+        super.onDestroy();
     }
 
     private static MotionEvent.PointerProperties pointer(int id) {
