@@ -146,6 +146,7 @@ void main() {
     float boundary = 1.0 - smoothstep(1.2, 3.2, edge_distance_pixels);
     color = mix(color, vec3(0.97, 0.97, 0.94), boundary);
 
+    // Zeroes and poles deliberately read like tic-tac-toe: O and X.
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_zero_count) break;
         float distance_pixels = length(z - u_zero_positions[index]) * pixel_radius;
@@ -158,10 +159,29 @@ void main() {
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_pole_count) break;
         float distance_pixels = length(z - u_pole_positions[index]) * pixel_radius;
-        float outer = 1.0 - smoothstep(7.0, 9.0, distance_pixels);
-        float inner = 1.0 - smoothstep(3.0, 4.5, distance_pixels);
-        color = mix(color, vec3(0.98), outer);
-        color = mix(color, vec3(0.04), inner);
+        float halo_disk = 1.0 - smoothstep(8.0, 10.0, distance_pixels);
+        vec2 pole_center = 0.5 * u_resolution + u_pole_positions[index] * pixel_radius;
+        vec2 diagonal = vec2(6.5, 6.5);
+        float x_halo = max(
+            line_mask(gl_FragCoord.xy, pole_center - diagonal, pole_center + diagonal, 4.2),
+            line_mask(
+                gl_FragCoord.xy,
+                pole_center + vec2(-diagonal.x, diagonal.y),
+                pole_center + vec2(diagonal.x, -diagonal.y),
+                4.2
+            )
+        );
+        float x_mark = max(
+            line_mask(gl_FragCoord.xy, pole_center - diagonal, pole_center + diagonal, 2.2),
+            line_mask(
+                gl_FragCoord.xy,
+                pole_center + vec2(-diagonal.x, diagonal.y),
+                pole_center + vec2(diagonal.x, -diagonal.y),
+                2.2
+            )
+        );
+        color = mix(color, vec3(0.98), max(0.72 * halo_disk, x_halo));
+        color = mix(color, vec3(0.04), x_mark);
     }
 
     float pause_radius = clamp(0.052 * min(u_resolution.x, u_resolution.y), 28.0, 42.0);
@@ -221,6 +241,30 @@ void main() {
         placement_radius * 0.25
     );
     color = mix(color, zero_mark_color, zero_mark);
+
+    // Explicit bottom-right exit control; Android system navigation still works.
+    vec2 exit_center = vec2(
+        u_resolution.x - pause_radius - 16.0,
+        pause_radius + 16.0
+    );
+    float exit_disk = circle_mask(gl_FragCoord.xy, exit_center, pause_radius);
+    color = mix(color, vec3(0.04), exit_disk * 0.78);
+    vec2 exit_diagonal = vec2(10.0, 10.0);
+    float exit_mark = max(
+        line_mask(
+            gl_FragCoord.xy,
+            exit_center - exit_diagonal,
+            exit_center + exit_diagonal,
+            2.4
+        ),
+        line_mask(
+            gl_FragCoord.xy,
+            exit_center + vec2(-exit_diagonal.x, exit_diagonal.y),
+            exit_center + vec2(exit_diagonal.x, -exit_diagonal.y),
+            2.4
+        )
+    );
+    color = mix(color, vec3(0.98), exit_mark);
 
     frag_color = vec4(color, 1.0);
 }
