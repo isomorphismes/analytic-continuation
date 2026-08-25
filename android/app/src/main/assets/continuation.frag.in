@@ -242,10 +242,12 @@ void main() {
     );
     color = mix(color, zero_mark_color, zero_mark);
 
-    // Explicit bottom-right exit control; Android system navigation still works.
+    // Keep the explicit exit X inside the app's safe touch area instead of
+    // competing with Android's landscape system-navigation edge.
+    float exit_inset = 4.0 * pause_radius + 16.0;
     vec2 exit_center = vec2(
-        u_resolution.x - pause_radius - 16.0,
-        pause_radius + 16.0
+        u_resolution.x - exit_inset,
+        exit_inset
     );
     float exit_disk = circle_mask(gl_FragCoord.xy, exit_center, pause_radius);
     color = mix(color, vec3(0.04), exit_disk * 0.78);
