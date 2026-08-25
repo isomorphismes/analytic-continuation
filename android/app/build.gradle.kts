@@ -17,7 +17,7 @@ val appVersionName = System.getenv("PLAY_VERSION_NAME") ?: "0.2.2"
 
 val uploadKeystorePath = System.getenv("ANDROID_UPLOAD_KEYSTORE_PATH")
 val uploadKeystorePassword = System.getenv("ANDROID_UPLOAD_KEYSTORE_PASSWORD")
-val uploadKeyAlias = System.getenv("ANDROID_UPLOAD_KEY_ALIAS")
+val uploadKeyAlias = System.getenv("ANDROID_UPLOAD_UPLOAD_KEY_ALIAS") ?: System.getenv("ANDROID_UPLOAD_KEY_ALIAS")
 val uploadKeyPassword = System.getenv("ANDROID_UPLOAD_KEY_PASSWORD")
 val uploadSigningConfigured = listOf(
     uploadKeystorePath,
@@ -76,6 +76,7 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         manifestPlaceholders["appLabel"] = "Analytic Continuation — Lasso"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -142,6 +143,12 @@ android {
             version = "3.22.1"
         }
     }
+}
+
+dependencies {
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
 
 tasks.named("preBuild").configure {
