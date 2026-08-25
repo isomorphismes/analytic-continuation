@@ -41,12 +41,16 @@ class ReleaseUiContractTests(unittest.TestCase):
     def test_visible_formula_overlay_uses_division_and_superscripts(self) -> None:
         activity = ACTIVITY.read_text()
         self.assertIn("FormulaOverlayView formula = new FormulaOverlayView(this);", activity)
-        self.assertIn('"w = φ⁻¹(z)"', activity)
-        self.assertIn('"φ(w) = w + c₂w² + c₃w³ + c₄w⁴ + c₅w⁵ + c₆w⁶"', activity)
-        self.assertIn('"f(z) = eⁱᵗ (∏ᵢ B(aᵢ,w)) ÷ (∏ⱼ B(pⱼ,w))"', activity)
-        self.assertIn('"B(a,w) = (w−a) ÷ (1−āw)"', activity)
-        self.assertNotIn("^2", activity)
-        self.assertNotIn(" / ", activity)
+        formula_literals = (
+            '"w = φ⁻¹(z)"',
+            '"φ(w) = w + c₂w² + c₃w³ + c₄w⁴ + c₅w⁵ + c₆w⁶"',
+            '"f(z) = eⁱᵗ (∏ᵢ B(aᵢ,w)) ÷ (∏ⱼ B(pⱼ,w))"',
+            '"B(a,w) = (w−a) ÷ (1−āw)"',
+        )
+        for formula in formula_literals:
+            self.assertIn(formula, activity)
+            self.assertNotIn("^", formula)
+            self.assertNotIn(" / ", formula)
         self.assertIn("public boolean onTouchEvent(MotionEvent event)", activity)
         self.assertIn("return false;", activity)
 
