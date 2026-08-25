@@ -46,10 +46,16 @@ jobs:
           grep -Fq 'holomorphic_walk_best_direction' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'add_factor(engine, PLACEMENT_ZERO, x, y);' android/app/src/main/cpp/analytic_continuation_random.c
           ! grep -Fq 'add_factor(engine, PLACEMENT_INFINITY' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'factor drag selected: %s index=%d' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'move_factor(' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'ANativeActivity_finish(engine->app->activity);' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'lasso zoom: %.3f' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'holomorphic walk started with %d workers' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'deformation_accepted_steps' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'u_placement_kind' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'Zeroes and poles deliberately read like tic-tac-toe: O and X.' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'vec2 exit_center' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'vec3 wegert_hcl_to_srgb' android/app/src/main/assets/wegert_color.glsl
           grep -Fq 'vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);' android/app/src/main/assets/continuation.frag.in
 
@@ -94,7 +100,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Launch, pause, deform, add a zero, and resume
+      - name: Launch, drag factors, deform, add a zero, resume, and exit
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -123,6 +129,24 @@ jobs:
             adb logcat -d > lasso-emulator.log
             grep -Fq 'holomorphic walk paused' lasso-emulator.log
 
+            # Drag the existing O. A move log is emitted only after the drag threshold
+            # and after move_factor has been called on the originally selected factor.
+            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); center_x=$((width / 2)); center_y=$((height / 2)); zero_x=$((center_x - 34 * lasso_radius / 100)); adb shell input swipe "$zero_x" "$center_y" "$((zero_x + 52))" "$((center_y - 34))" 450
+            sleep 1
+            adb logcat -d > lasso-emulator.log
+            grep -Fq 'factor drag selected: zero index=0' lasso-emulator.log
+            grep -Fq 'zero moved: index=0' lasso-emulator.log
+            ! grep -Fq 'zero moved: index=0 z=-0.34+0i' lasso-emulator.log
+
+            # Drag the existing X independently; zeros-only means "cannot add poles",
+            # not "cannot move the pole already defining the rational function".
+            pole_x=$((center_x + 34 * lasso_radius / 100)); adb shell input swipe "$pole_x" "$center_y" "$((pole_x - 48))" "$((center_y + 36))" 450
+            sleep 1
+            adb logcat -d > lasso-emulator.log
+            grep -Fq 'factor drag selected: pole index=0' lasso-emulator.log
+            grep -Fq 'pole moved: index=0' lasso-emulator.log
+            ! grep -Fq 'pole moved: index=0 z=0.34+0i' lasso-emulator.log
+
             set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); center_x=$((width / 2)); center_y=$((height / 2)); offset=$((707 * lasso_radius / 1000)); start_x=$((center_x + offset)); start_y=$((center_y - offset)); end_x=$((start_x + 50)); end_y=$((start_y - 50)); adb shell input swipe "$start_x" "$start_y" "$end_x" "$end_y" 500
             sleep 1
             adb logcat -d > lasso-emulator.log
@@ -149,6 +173,13 @@ jobs:
             grep -Eq 'holomorphic walk: workers=3 steps=[0-9]+ .*zeros=2 poles=1' lasso-emulator.log
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable|FATAL EXCEPTION' lasso-emulator.log
             adb exec-out screencap -p > lasso-emulator.png
+
+            # Exercise the explicit bottom-right exit target after capturing evidence.
+            adb shell input tap "$((width - control_radius - 16))" "$((height - control_radius - 16))"
+            sleep 2
+            adb logcat -d > lasso-emulator.log
+            grep -Fq 'exit requested' lasso-emulator.log
+            ! adb shell dumpsys activity activities | grep -Fq 'mResumedActivity: ActivityRecord{'
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
