@@ -76,6 +76,8 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         manifestPlaceholders["appLabel"] = "Analytic Continuation — Lasso"
+        testApplicationId = "org.isomorphisms.analyticcontinuation.test"
+        testInstrumentationRunner = "android.test.InstrumentationTestRunner"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
