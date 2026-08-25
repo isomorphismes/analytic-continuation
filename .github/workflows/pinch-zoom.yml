@@ -34,9 +34,9 @@ jobs:
       - name: Install native Android toolchain
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
-      - name: Build app and framework instrumentation APK
+      - name: Build debug APK with touch self-test path
         working-directory: android
-        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+        run: ./gradlew --no-daemon :app:assembleDebug
 
       - name: Enable KVM permissions
         run: |
@@ -56,29 +56,27 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
           script: |
             app=android/app/build/outputs/apk/debug/app-debug.apk
-            test_apk=android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             test -s "$app"
-            test -s "$test_apk"
             adb install -r "$app"
-            adb install -r "$test_apk"
             adb shell settings put secure immersive_mode_confirmations confirmed
             adb logcat -c
-            adb shell am instrument -w \
-              org.isomorphisms.analyticcontinuation.test/android.test.InstrumentationTestRunner \
-              | tee pinch-instrumentation.txt
-            grep -Fq 'OK (1 test)' pinch-instrumentation.txt
-            sleep 1
+            adb shell am start -W \
+              -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity \
+              --ez ci_touch_self_test true
+            sleep 5
             adb logcat -d > pinch-emulator.log
+            grep -Fq 'ci touch self-test: surface=' pinch-emulator.log
             grep -Fq 'lasso zoom: 2.250' pinch-emulator.log
             grep -Fq 'factor drag selected: zero index=0' pinch-emulator.log
             grep -Fq 'zero moved: index=0' pinch-emulator.log
             ! grep -Eiq 'FATAL EXCEPTION|shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|lasso shader uniforms unavailable' pinch-emulator.log
+            adb exec-out screencap -p > pinch-emulator.png
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: analytic-continuation-pinch-evidence
           path: |
-            pinch-instrumentation.txt
             pinch-emulator.log
+            pinch-emulator.png
           if-no-files-found: warn
