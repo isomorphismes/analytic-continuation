@@ -17,7 +17,7 @@ val appVersionName = System.getenv("PLAY_VERSION_NAME") ?: "0.2.2"
 
 val uploadKeystorePath = System.getenv("ANDROID_UPLOAD_KEYSTORE_PATH")
 val uploadKeystorePassword = System.getenv("ANDROID_UPLOAD_KEYSTORE_PASSWORD")
-val uploadKeyAlias = System.getenv("ANDROID_UPLOAD_UPLOAD_KEY_ALIAS") ?: System.getenv("ANDROID_UPLOAD_KEY_ALIAS")
+val uploadKeyAlias = System.getenv("ANDROID_UPLOAD_KEY_ALIAS")
 val uploadKeyPassword = System.getenv("ANDROID_UPLOAD_KEY_PASSWORD")
 val uploadSigningConfigured = listOf(
     uploadKeystorePath,
