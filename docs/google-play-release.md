@@ -1,9 +1,8 @@
 # Google Play release boundary
 
-ManimGL is a desktop Python renderer, not an Android runtime. CI renders named
-smoke movies on Linux and packages those MP4 files for offline viewing. The same
-app also contains a native C/OpenGL ES 3 convergence-disc explorer adapted from
-Wegert; it does not embed Python or Manim on the phone.
+The release is the native C/OpenGL ES 3 convergence-disc explorer adapted from
+Wegert. It does not embed Python, a desktop animation engine, or generated MP4
+walkthroughs.
 
 The app's permanent package ID is `org.isomorphisms.analyticcontinuation`, and
 it targets Android API 36. Native builds include ARM64, ARMv7, and x86_64. The
@@ -26,10 +25,9 @@ private upload key.
 ## First and later uploads
 
 Create the Play application with the exact package ID above and complete its
-store and policy declarations. Run `Android viewer and native convergence
-explorer` with `destination: artifact-only`; it renders the two movies and
-returns a signed `.aab` containing both the viewer and live explorer for the
-first manual Play Console upload.
+store and policy declarations. Run `Android native convergence explorer` with
+`destination: artifact-only`; it returns a signed native `.aab`
+for the first manual Play Console upload.
 
 After enabling the Google Play Developer API and granting its service account
 access to the app, later runs may select `internal-track`. CI cannot target

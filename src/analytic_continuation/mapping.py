@@ -1,4 +1,4 @@
-"""Turn unbounded complex maps into finite movie coordinates."""
+"""Turn unbounded complex maps into finite visualization coordinates."""
 
 from __future__ import annotations
 
@@ -21,8 +21,9 @@ def make_visible_map(evaluator: ComplexEvaluator, view: ViewBox) -> Callable[[co
     """Evaluate and clip a complex map to the visible rectangle.
 
     Poles and overflows are sent to the boundary in the direction of the
-    input point.  This keeps every Manim control point finite; it is a drawing
-    rule, not a replacement value for the mathematical function.
+    input point. This keeps every future drawing control point finite; it is a
+    renderer-independent rule, not a replacement value for the mathematical
+    function.
     """
 
     def visible_map(value: complex) -> complex:

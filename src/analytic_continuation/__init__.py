@@ -1,4 +1,4 @@
-"""Complex-function movie specifications and evaluators."""
+"""Renderer-independent complex-function specifications and evaluators."""
 
 from .continuation import (
     ContinuationDisc,

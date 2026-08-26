@@ -1,4 +1,4 @@
-"""Load and validate the JSON contract shared by the renderer and Wegert."""
+"""Load and validate the retained visualization contract shared with Wegert."""
 
 from __future__ import annotations
 
