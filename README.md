@@ -1,25 +1,23 @@
 # Analytic continuation
 
-Explore radii of convergence live on Android, or render a short movie in which
-a complex grid opens from the input plane into the map `z → f(z)`, pauses, and
-closes again.
+The released application is a native Android explorer for domain coloring,
+zeros, poles, and convergence-disc geometry. It launches directly into a C
+`NativeActivity` with an EGL/OpenGL ES 3 renderer and touch loop adapted from
+Wegert. No desktop animation engine or Python runtime is packaged in the app.
 
-The renderer uses [ManimGL](https://github.com/3b1b/manim), the version of
-Manim maintained by 3Blue1Brown.  The 2016 zeta video source is
-[`3b1b/videos/_2016/zeta.py`](https://github.com/3b1b/videos/blob/master/_2016/zeta.py).
-That source calls `mpmath.zeta` to obtain already-continued values and then
-warps a sampled grid.  Its movie interpolation is not itself an algorithm for
-analytic continuation.  This project keeps the same distinction explicit.
+The repository also keeps a small renderer-independent Python reference model.
+It validates strict JSON fixtures, evaluates a named function registry, and
+checks the distinction between revealing pole-free discs and actually carrying
+a germ along a path. It does not render video.
 
-## First slice
+## Reference model
 
-- choose a named complex function in JSON
-- set the visible complex domain
-- use the default `whole` view or preview a path with a `disc_reveal`
-- optionally mark a few input points as yellow probes
-- render the grid and probes opening under `f` and closing back to their inputs
-- clip poles and enormous outputs at the movie boundary so Manim always gets
-  finite drawing coordinates
+- choose a named complex function in JSON;
+- set the visible complex domain;
+- use the default `whole` view or describe a path with `disc_reveal`;
+- optionally record input probes;
+- validate finite drawing coordinates and continuation-disc geometry without
+  binding those contracts to a renderer.
 
 The registry currently contains:
 
@@ -34,34 +32,25 @@ The registry currently contains:
 | `airy_ai`, `airy_bi` | Airy functions | entire |
 | `bessel_j` | Bessel J with an order parameter | entire for integer order; branched at `0` otherwise |
 
-There is no Python `eval` input.  A new function gets an explicit registry
+There is no Python `eval` input. A new function gets an explicit registry
 entry and parameter contract.
 
-## Run it
+## Check it
 
 Python 3.10 or later is required.
-
-On Ubuntu or Debian, ManimGL also requires FFmpeg and the Pango development
-headers:
-
-```sh
-sudo apt install ffmpeg libpango1.0-dev
-```
 
 ```sh
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install -e '.[movie]'
+python -m pip install -e .
 
 analytic-continuation list-functions
 analytic-continuation validate examples/zeta.json
-analytic-continuation render examples/zeta.json
 analytic-continuation validate examples/rational_disc_reveal.json
 ```
 
-Use `--preview` on the render command for ManimGL's interactive window.  The
-examples include zeta, Airy Ai, Bessel J order zero, and rational maps exported
-from Wegert.
+The examples include zeta, Airy Ai, Bessel J order zero, and rational maps
+exported from Wegert.
 
 Run the small non-rendering test suite with:
 
@@ -69,12 +58,7 @@ Run the small non-rendering test suite with:
 python -m unittest discover -s tests -v
 ```
 
-## Android viewer and live explorer
-
-The Android home screen keeps the offline MP4 viewer. Its **Explore convergence
-discs live** action opens a native C `NativeActivity` using Wegert's proven
-EGL/OpenGL ES 3 renderer and touch loop; ManimGL and Python do not run on the
-phone.
+## Native Android explorer
 
 The live model is the normalized rational function
 
@@ -90,19 +74,23 @@ must lie strictly inside the preceding open disc. Revealed discs show the live
 phase portrait; everything else is a function-independent charcoal weave, so
 hidden values do not leak through the background.
 
-This first explorer visualizes valid convergence-disc geometry while evaluating
-the selected rational function directly. It does not yet propagate Taylor
-coefficients or track branches. The Play workflow builds an installable debug
-APK for validation and a signed AAB while preserving the movie-rendering path.
-See [`docs/google-play-release.md`](docs/google-play-release.md).
+This explorer visualizes valid convergence-disc geometry while evaluating the
+selected function directly. It does not yet propagate Taylor coefficients or
+track branches. The Play workflow builds an installable debug APK for
+validation and a signed native AAB. See
+[`docs/google-play-release.md`](docs/google-play-release.md).
 
 Direct test installs use an update-stable, test-only GitHub APK that launches
 the live native explorer without video playback. See
 [`docs/github-apk-release.md`](docs/github-apk-release.md).
 
-## Movie JSON
+## Retained visualization JSON
 
-The complete strict contract is documented in [`docs/movie-v1.md`](docs/movie-v1.md).
+The original `analytic-continuation/movie-v1` schema remains as
+renderer-independent compatibility data. The complete strict contract is
+documented in [`docs/movie-v1.md`](docs/movie-v1.md). A future guided-rendering
+path must enter through checked Manimi/Ithon source; the retired renderer is not
+a fallback.
 
 Complex values are JSON numbers, `[real, imag]` pairs, or objects with `real`
 and `imag` fields.  They are never expression strings.
@@ -134,7 +122,7 @@ and `imag` fields.  They are never expression strings.
 
 ### Disc-reveal view
 
-The default `view.mode` is `whole`, so existing movie files remain valid.  A
+The default `view.mode` is `whole`, so existing specification files remain valid. A
 `disc_reveal` view supplies a nonempty path of Taylor-disc centers and an
 explicit reveal time for each patch:
 
@@ -160,12 +148,10 @@ branch tracking, are rejected rather than shown misleadingly.
 This mode previews pole-free disc geometry.  It is **not analytic
 continuation**: it does not carry a germ or calculate a new Taylor expansion.
 It checks and reveals the overlapping discs in path order, then evaluates the
-selected closed form to deform the grid.  Each patch clips the same Manim plane
-used by `whole` mode, including its axes, primary lines, and faded
-subdivisions.  Overlapping line intervals are merged before deformation so the
-final moving grid is not duplicated or transformed twice.  The movie includes
-the closed-form disclosure on screen.  The name `continuation` remains free
-for a later mode that actually propagates a germ and demonstrates uniqueness.
+selected closed form to map the grid. Overlapping line intervals are merged so
+the same grid segment is not represented twice. The name `continuation`
+remains free for a later mode that actually propagates a germ and demonstrates
+uniqueness.
 
 ## Wegert boundary
 
@@ -212,5 +198,5 @@ A continuation computation needs more data than the current disc view:
 That mode can reveal the continued Wegert portrait one disc at a time.  It is
 especially useful for `log`, `sqrt`, non-integer Bessel functions, and other
 multivalued functions.  Airy Ai/Bi and integer-order Bessel J are already
-entire, so their whole-plane movies are complex-map deformations, not dramatic
-examples of continuation across a barrier.
+entire, so their whole-plane visualizations are complex-map deformations, not
+dramatic examples of continuation across a barrier.

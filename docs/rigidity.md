@@ -193,9 +193,9 @@ not alter the recognized mathematical state.
 
 ## Implementation boundary
 
-The general function movie generator remains independent. The rational
-zero-pole work supplies canonical factor data and `disc_reveal`; it does not
-become the rigidity engine.
+The retained function specification and reference evaluator remain
+independent. The rational zero-pole work supplies canonical factor data and
+`disc_reveal`; it does not become the rigidity engine.
 
 The next implementation needs separate responsibilities for:
 

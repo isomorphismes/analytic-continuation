@@ -1,4 +1,4 @@
-name: Android viewer and native convergence explorer
+name: Android native convergence explorer
 
 on:
   pull_request:
@@ -174,51 +174,8 @@ jobs:
             analytic-continuation-emulator.png
           if-no-files-found: warn
 
-  render-movies:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-
-      - name: Install ManimGL requirements
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg libpango1.0-dev xvfb xauth libgl1-mesa-dri
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[movie]'
-
-      - name: Render bundled movies
-        env:
-          LIBGL_ALWAYS_SOFTWARE: '1'
-        run: |
-          ANALYTIC_CONTINUATION_SPEC="$GITHUB_WORKSPACE/examples/zeta_smoke.json" \
-            xvfb-run -a manimgl \
-              src/analytic_continuation/scene.py FunctionOpenClose \
-              -w -l \
-              --video_dir rendered \
-              --file_name zeta-open-close
-          ANALYTIC_CONTINUATION_SPEC="$GITHUB_WORKSPACE/examples/rational_disc_reveal_smoke.json" \
-            xvfb-run -a manimgl \
-              src/analytic_continuation/scene.py FunctionOpenClose \
-              -w -l \
-              --video_dir rendered \
-              --file_name rational-disc-reveal
-          bash scripts/prepare_android_movies.sh rendered play-movies
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: analytic-continuation-movies
-          path: play-movies/*.mp4
-          if-no-files-found: error
-
   publish:
     if: github.event_name == 'workflow_dispatch'
-    needs: render-movies
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: google-play
@@ -235,11 +192,6 @@ jobs:
       - name: Install native Android toolchain
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: analytic-continuation-movies
-          path: android/app/src/main/assets/movies
-
       - name: Restore private upload key
         env:
           UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
@@ -248,7 +200,7 @@ jobs:
           test -n "$UPLOAD_KEYSTORE_BASE64"
           printf '%s' "$UPLOAD_KEYSTORE_BASE64" | base64 --decode > /tmp/play-upload.p12
 
-      - name: Build signed viewer and explorer bundle
+      - name: Build signed native explorer bundle
         working-directory: android
         env:
           PLAY_VERSION_CODE: ${{ inputs.version_code }}

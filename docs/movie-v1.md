@@ -1,7 +1,9 @@
 # `analytic-continuation/movie-v1`
 
-The movie file is a strict JSON object. Unknown fields are errors. Existing
-files that omit `view.mode` keep the default whole-plane behavior.
+This retained compatibility file is a strict JSON object. Unknown fields are
+errors. The repository validates the contract but no longer supplies a video
+renderer for it. Existing files that omit `view.mode` keep the default
+whole-plane behavior.
 
 ## Top level
 
