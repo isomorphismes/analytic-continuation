@@ -19,6 +19,7 @@ uniform vec2 u_zero_positions[MAX_FACTORS];
 uniform vec2 u_pole_positions[MAX_FACTORS];
 uniform vec2 u_lasso_coefficients[LASSO_COEFFICIENT_COUNT];
 uniform float u_phase;
+uniform float u_flow_time;
 uniform int u_paused;
 uniform float u_zoom;
 uniform int u_placement_kind;
@@ -36,6 +37,27 @@ vec2 complex_divide(vec2 numerator, vec2 denominator) {
         numerator.x * denominator.x + numerator.y * denominator.y,
         numerator.y * denominator.x - numerator.x * denominator.y
     ) / scale;
+}
+
+// The flowing experiment multiplies the rational map by exp(q_t(w)), where
+// q_t is an entire quadratic polynomial.  exp(q_t) is entire and never zero,
+// so this changes neither the zero set nor the explicitly stored pole set.
+// The coefficient amplitudes are fixed; only one clock uniform crosses the
+// CPU/GPU boundary, and every fragment evaluates the same descriptor.
+vec2 flowing_descriptor(vec2 w, out vec2 derivative) {
+    vec2 linear_coefficient = 0.16 * vec2(
+        cos(0.37 * u_flow_time),
+        sin(0.37 * u_flow_time)
+    );
+    vec2 quadratic_coefficient = 0.055 * vec2(
+        cos(-0.23 * u_flow_time + 1.1),
+        sin(-0.23 * u_flow_time + 1.1)
+    );
+    vec2 w_squared = complex_multiply(w, w);
+    derivative = linear_coefficient +
+        2.0 * complex_multiply(quadratic_coefficient, w);
+    return complex_multiply(linear_coefficient, w) +
+        complex_multiply(quadratic_coefficient, w_squared);
 }
 
 vec2 lasso_map_and_derivative(vec2 w, float amount, out vec2 derivative) {
@@ -132,8 +154,12 @@ void main() {
         modulus_product = clamp(modulus_product, 1.0e-12, 1.0e12);
     }
 
-    float phase = atan(phase_product.y, phase_product.x) + u_phase;
-    float log_modulus = log(max(modulus_product, 1.0e-12));
+    vec2 flow_derivative;
+    vec2 flow_log_multiplier = flowing_descriptor(w, flow_derivative);
+    float phase = atan(phase_product.y, phase_product.x) + u_phase +
+        flow_log_multiplier.y;
+    float log_modulus = log(max(modulus_product, 1.0e-12)) +
+        flow_log_multiplier.x;
     vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);
 
     // Everything below this point is an analytic-continuation overlay, not
