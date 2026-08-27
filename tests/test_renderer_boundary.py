@@ -29,6 +29,21 @@ class RendererBoundaryTests(unittest.TestCase):
         self.assertIn("ExplorerActivity", manifest)
         self.assertNotIn("MainActivity", manifest)
 
+    def test_flow_is_analytic_and_has_no_reduction_path(self) -> None:
+        shader = (
+            ROOT / "android" / "app" / "src" / "main" / "assets" /
+            "continuation.frag.in"
+        ).read_text()
+        native_build = (
+            ROOT / "android" / "app" / "src" / "main" / "cpp" / "CMakeLists.txt"
+        ).read_text()
+        self.assertIn("flowing_descriptor", shader)
+        self.assertIn("flow_log_multiplier.x", shader)
+        self.assertIn("flow_log_multiplier.y", shader)
+        self.assertNotIn("dFdx", shader)
+        self.assertNotIn("dFdy", shader)
+        self.assertNotIn("holomorphic_walk.c", native_build)
+
 
 if __name__ == "__main__":
     unittest.main()
