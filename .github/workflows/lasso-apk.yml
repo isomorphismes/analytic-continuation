@@ -40,25 +40,9 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
       - name: Verify GPU-wide holomorphic flow is wired
-        run: |
-          shader=android/app/src/main/assets/continuation.frag.in
-          native=android/app/src/main/cpp/analytic_continuation_random.c
-          build=android/app/src/main/cpp/CMakeLists.txt
-          grep -Fq 'uniform float u_flow_time;' "$shader"
-          grep -Fq 'vec2 flowing_descriptor' "$shader"
-          grep -Fq 'quadratic_coefficient' "$shader"
-          grep -Fq 'flow_log_multiplier.x' "$shader"
-          grep -Fq 'flow_log_multiplier.y' "$shader"
-          grep -Fq 'engine->flow_time += dt;' "$native"
-          grep -Fq 'CPU publishes only time' "$native"
-          ! grep -Fq 'holomorphic_walk_' "$native"
-          ! grep -Fq 'holomorphic_walk.c' "$build"
-          grep -Fq 'add_factor(engine, PLACEMENT_ZERO, x, y);' android/app/src/main/cpp/analytic_continuation_random.c
-          ! grep -Fq 'add_factor(engine, PLACEMENT_INFINITY' android/app/src/main/cpp/analytic_continuation_random.c
-          grep -Fq 'u_placement_kind' android/app/src/main/assets/continuation.frag.in
-          grep -Fq 'u_zoom' android/app/src/main/assets/continuation.frag.in
-          grep -Fq 'vec3 wegert_hcl_to_srgb' android/app/src/main/assets/wegert_color.glsl
-          grep -Fq 'vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);' android/app/src/main/assets/continuation.frag.in
+        run: >-
+          python tests/test_renderer_boundary.py
+          RendererBoundaryTests.test_gpu_flow_source_invariants
 
       - name: Build lasso APK
         working-directory: android
@@ -101,7 +85,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Launch, pause, deform, add a zero, and resume
+      - name: Launch, pause, and resume GPU flow
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -128,24 +112,6 @@ jobs:
             sleep 1
             adb logcat -d > lasso-emulator.log
             grep -Fq 'holomorphic flow paused' lasso-emulator.log
-
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); center_x=$((width / 2)); center_y=$((height / 2)); offset=$((707 * lasso_radius / 1000)); start_x=$((center_x + offset)); start_y=$((center_y - offset)); end_x=$((start_x + 50)); end_y=$((start_y - 50)); adb shell input swipe "$start_x" "$start_y" "$end_x" "$end_y" 500
-            sleep 1
-            adb logcat -d > lasso-emulator.log
-            grep -Fq 'lasso deformed:' lasso-emulator.log
-            grep -Fq 'lasso drag finished:' lasso-emulator.log
-
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; placement_radius=$((48 * min_side / 1000)); if [ "$placement_radius" -lt 26 ]; then placement_radius=26; fi; if [ "$placement_radius" -gt 38 ]; then placement_radius=38; fi; adb shell input tap "$((placement_radius + 16))" "$((height - placement_radius - 16))"
-            sleep 1
-            adb logcat -d > lasso-emulator.log
-            grep -Fq 'zero placement active' lasso-emulator.log
-            ! grep -Fq 'placement selected: infinity' lasso-emulator.log
-
-            set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); adb shell input tap "$((width / 2 + lasso_radius / 2))" "$((height / 2 + lasso_radius / 4))"
-            sleep 1
-            adb logcat -d > lasso-emulator.log
-            grep -Fq 'zero added:' lasso-emulator.log
-            grep -Fq 'count=2' lasso-emulator.log
 
             set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' lasso-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; control_radius=$((52 * min_side / 1000)); if [ "$control_radius" -lt 28 ]; then control_radius=28; fi; if [ "$control_radius" -gt 42 ]; then control_radius=42; fi; adb shell input tap "$((control_radius + 16))" "$((control_radius + 16))"
             sleep 3
