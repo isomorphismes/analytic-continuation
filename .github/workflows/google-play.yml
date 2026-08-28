@@ -152,11 +152,10 @@ jobs:
             adb logcat -d > analytic-continuation-emulator.log
             adb exec-out screencap -p > analytic-continuation-emulator.png
             adb shell pidof -s org.isomorphisms.analyticcontinuation.lasso.dev | tr -d '\r' | grep -Eq '^[0-9]+$'
-            grep -Fq 'holomorphic walk started with 3 workers' analytic-continuation-emulator.log
+            grep -Fq 'GPU-wide holomorphic flow enabled; CPU publishes only time' analytic-continuation-emulator.log
             grep -Fq 'lasso ready:' analytic-continuation-emulator.log
             grep -Fq 'zeros=1 poles=1 placement=zero' analytic-continuation-emulator.log
             grep -Fq 'lasso first frame:' analytic-continuation-emulator.log
-            steps=$(sed -n 's/.*holomorphic walk: workers=3 steps=\([0-9][0-9]*\).*/\1/p' analytic-continuation-emulator.log | tail -1); test -n "$steps"; test "$steps" -gt 0
             set -- $(sed -n 's/.*lasso ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' analytic-continuation-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; lasso_radius=$((42 * min_side / 100)); adb shell input tap "$((width / 2 + lasso_radius / 2))" "$((height / 2 + lasso_radius / 4))"
             sleep 1
             adb logcat -d > analytic-continuation-emulator.log
