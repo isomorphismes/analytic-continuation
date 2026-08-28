@@ -1,5 +1,5 @@
-Analytic Continuation is a native Android explorer for complex functions and convergence-disc geometry.
+Holomorphic Random Explorer is a native Android experiment in continuously changing holomorphic maps.
 
-The live view uses GPU-rendered phase portraits. You can place and move zeros and poles, inspect overlapping convergence discs, and explore how known singularities constrain the radius around each center.
+Three small workers search for bounded, low-disturbance changes to a near-identity holomorphic map. The GPU evaluates the moving field for every pixel. Pause and resume the motion or deform the current map directly.
 
-The Android explorer runs natively on the device and contains no generated movie bundle or desktop animation runtime.
+The app is not yet a germ-transport or branch-tracking implementation of analytic continuation. It runs natively on the device and contains no generated movie bundle or desktop animation runtime.

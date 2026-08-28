@@ -59,16 +59,15 @@ jobs:
       - name: Install native Android toolchain
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
-      - name: Test convergence and touch state rules
+      - name: Test the active holomorphic worker
         run: |
-          cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_continuation_path.c -lm -o /tmp/analytic-continuation-path-test
-          /tmp/analytic-continuation-path-test
-          cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_gesture_state.c -o /tmp/analytic-gesture-test
-          /tmp/analytic-gesture-test
-          cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_factor_state.c -o /tmp/analytic-factor-test
-          /tmp/analytic-factor-test
-          cc -std=c11 -Wall -Wextra -Werror -pedantic tests/test_factor_snap.c -lm -o /tmp/analytic-snap-test
-          /tmp/analytic-snap-test
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Iandroid/app/src/main/cpp \
+            tests/test_holomorphic_walk.c \
+            android/app/src/main/cpp/holomorphic_walk.c \
+            -pthread -lm \
+            -o /tmp/test-holomorphic-walk
+          /tmp/test-holomorphic-walk
 
       - name: Create disposable validation key
         run: |

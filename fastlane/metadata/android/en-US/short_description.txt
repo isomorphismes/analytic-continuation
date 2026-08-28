@@ -1,1 +1,1 @@
-Explore convergence discs and complex maps interactively on Android
+Explore a continuously changing holomorphic map on Android
