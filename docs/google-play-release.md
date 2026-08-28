@@ -24,7 +24,7 @@ private upload key.
 ## First and later uploads
 
 Create the Play application with the exact package ID above and complete its
-store and policy declarations. Run `Android native convergence explorer` with
+store and policy declarations. Run `Android holomorphic random explorer` with
 `destination: artifact-only`; it returns a signed native `.aab`
 for the first manual Play Console upload.
 

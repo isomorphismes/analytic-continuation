@@ -1,4 +1,4 @@
-name: Android native convergence explorer
+name: Android holomorphic random explorer
 
 on:
   pull_request:

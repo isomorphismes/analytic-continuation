@@ -1,4 +1,4 @@
-name: Lasso APK
+name: Holomorphic Random Explorer APK
 
 on:
   push:
@@ -53,7 +53,7 @@ jobs:
           grep -Fq 'vec3 wegert_hcl_to_srgb' android/app/src/main/assets/wegert_color.glsl
           grep -Fq 'vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);' android/app/src/main/assets/continuation.frag.in
 
-      - name: Build lasso APK
+      - name: Build holomorphic-random APK
         working-directory: android
         run: ./gradlew --no-daemon :app:assembleDebug
 

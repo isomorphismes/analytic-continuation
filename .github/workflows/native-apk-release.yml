@@ -1,4 +1,4 @@
-name: Build, touch, and publish native APK
+name: Build, test, and publish holomorphic-random APK
 
 on:
   push:
@@ -199,7 +199,7 @@ jobs:
           release_title="Analytic Continuation Android test ${RELEASE_VERSION}"
           release_notes="Corrected Android test APK from commit ${GITHUB_SHA}.
 
-          The launcher opens directly into the live native EGL/OpenGL ES convergence explorer. CI rendered the explorer and accepted an explorer touch on this exact APK before publication.
+          The launcher opens directly into the live native EGL/OpenGL ES holomorphic-random explorer. CI rendered the flowing field and accepted an explorer touch on this exact APK before publication.
 
           It uses the same repository test-only signing key as earlier GitHub APKs, so it installs as an update. It is not the separately signed Google Play production build."
 
