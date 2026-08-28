@@ -20,7 +20,7 @@ jobs:
         run: >-
           cmp
           android/app/src/main/assets/wegert_color.glsl
-          .wegert-upstream/app/src/main/assets/wegert_color.glsl
+          .wegert-upstream/wegert_color.glsl
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
