@@ -75,7 +75,7 @@ android {
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
-        manifestPlaceholders["appLabel"] = "Analytic Continuation — Lasso"
+        manifestPlaceholders["appLabel"] = "Holomorphic Random Explorer"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -114,7 +114,7 @@ android {
             // public key input is present. F-Droid does not need a debug signer.
             applicationIdSuffix = ".lasso.dev"
             versionNameSuffix = "-dev"
-            manifestPlaceholders["appLabel"] = "Analytic Continuation — Lasso Dev"
+            manifestPlaceholders["appLabel"] = "Holomorphic Random Explorer Dev"
             signingConfigs.findByName("sideloadDev")?.let {
                 signingConfig = it
             }

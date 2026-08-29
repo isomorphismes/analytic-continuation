@@ -136,7 +136,7 @@ void main() {
     float log_modulus = log(max(modulus_product, 1.0e-12));
     vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);
 
-    // Everything below this point is an analytic-continuation overlay, not
+    // Everything below this point is an explorer overlay, not
     // part of the value -> Wegert color behavior oracle.
     vec2 unit_w = w_radius > 1.0e-6 ? w / w_radius : vec2(1.0, 0.0);
     vec2 boundary_derivative;

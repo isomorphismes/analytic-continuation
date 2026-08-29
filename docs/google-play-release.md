@@ -1,8 +1,7 @@
 # Google Play release boundary
 
-The release is the native C/OpenGL ES 3 convergence-disc explorer adapted from
-Wegert. It does not embed Python, a desktop animation engine, or generated MP4
-walkthroughs.
+The release is the native C/OpenGL ES 3 holomorphic-random explorer. It does not
+embed Python, a desktop animation engine, or generated MP4 walkthroughs.
 
 The app's permanent package ID is `org.isomorphisms.analyticcontinuation`, and
 it targets Android API 36. Native builds include ARM64, ARMv7, and x86_64. The
@@ -25,7 +24,7 @@ private upload key.
 ## First and later uploads
 
 Create the Play application with the exact package ID above and complete its
-store and policy declarations. Run `Android native convergence explorer` with
+store and policy declarations. Run `Android holomorphic random explorer` with
 `destination: artifact-only`; it returns a signed native `.aab`
 for the first manual Play Console upload.
 
