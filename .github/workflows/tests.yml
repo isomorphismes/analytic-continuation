@@ -25,12 +25,3 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests -v
-      - name: Smoke-test three holomorphic workers
-        run: |
-          cc -std=c11 -Wall -Wextra -Werror \
-            -Iandroid/app/src/main/cpp \
-            tests/test_holomorphic_walk.c \
-            android/app/src/main/cpp/holomorphic_walk.c \
-            -pthread -lm \
-            -o /tmp/test-holomorphic-walk
-          /tmp/test-holomorphic-walk

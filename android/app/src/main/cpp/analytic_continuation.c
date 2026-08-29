@@ -68,6 +68,7 @@ struct engine {
     GLint pole_positions_location;
     GLint lasso_coefficients_location;
     GLint phase_location;
+    GLint flow_time_location;
     GLint paused_location;
     GLint zoom_location;
     GLint placement_kind_location;
@@ -88,6 +89,7 @@ struct engine {
 
     float phase;
     float phase_velocity;
+    float flow_time;
     uint32_t random_state;
     double last_animation_time;
     bool paused;
@@ -462,6 +464,7 @@ static bool create_renderer(struct engine *engine) {
     engine->pole_positions_location = glGetUniformLocation(engine->program, "u_pole_positions[0]");
     engine->lasso_coefficients_location = glGetUniformLocation(engine->program, "u_lasso_coefficients[0]");
     engine->phase_location = glGetUniformLocation(engine->program, "u_phase");
+    engine->flow_time_location = glGetUniformLocation(engine->program, "u_flow_time");
     engine->paused_location = glGetUniformLocation(engine->program, "u_paused");
     engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
     engine->placement_kind_location = glGetUniformLocation(engine->program, "u_placement_kind");
@@ -471,7 +474,8 @@ static bool create_renderer(struct engine *engine) {
         engine->pole_count_location < 0 || engine->zero_preimages_location < 0 ||
         engine->pole_preimages_location < 0 || engine->zero_positions_location < 0 ||
         engine->pole_positions_location < 0 || engine->lasso_coefficients_location < 0 ||
-        engine->phase_location < 0 || engine->paused_location < 0 ||
+        engine->phase_location < 0 || engine->flow_time_location < 0 ||
+        engine->paused_location < 0 ||
         engine->zoom_location < 0 || engine->placement_kind_location < 0
     ) {
         LOGE("lasso shader uniforms unavailable");
@@ -647,6 +651,7 @@ static void draw_frame(struct engine *engine) {
         &engine->lasso_coefficients[0][0]
     );
     glUniform1f(engine->phase_location, engine->phase);
+    glUniform1f(engine->flow_time_location, engine->flow_time);
     glUniform1i(engine->paused_location, engine->paused ? 1 : 0);
     glUniform1f(engine->zoom_location, engine->zoom);
     glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
