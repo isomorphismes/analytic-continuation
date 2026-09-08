@@ -2,4 +2,4 @@ Holomorphic Random Explorer is a native Android complex-function playground buil
 
 Place and move explicit zeros and poles on the ordinary complex plane while a separate nonvanishing holomorphic factor changes continuously. Small workers propose nearby coefficient directions and score their analytic phase/log-modulus effect before the app accepts a step. The GPU evaluates the accepted field for every pixel and hands the resulting phase and log modulus to the Wegert coloring core.
 
-Pause or resume the motion, edit zeros and poles, and pan or zoom the live portrait. Lasso, overlapping-disc, branch-sheet, and broader Riemann-surface experiments live separately in the Lacunary project. The app runs natively on the device and contains no generated movie bundle or desktop animation runtime.
+Pause or resume the motion, edit zeros and poles, and zoom the live portrait. Lasso, overlapping-disc, branch-sheet, and broader Riemann-surface experiments live separately in the Lacunary project. The app runs natively on the device and contains no generated movie bundle or desktop animation runtime.

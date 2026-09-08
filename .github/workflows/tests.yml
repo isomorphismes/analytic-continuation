@@ -12,7 +12,7 @@ jobs:
       - name: Check out Wegert coloring oracle
         uses: actions/checkout@v4
         with:
-          repository: isomorphisms/wegert
+          repository: isomorphismes/wegert
           ref: main
           path: .wegert-upstream
           persist-credentials: false
