@@ -1,0 +1,120 @@
+name: Publish Lasso Dev v0.1.2 prerelease
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-lasso-dev-v0.1.2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-lasso-dev-v0.1.2
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out the exact phone-snapshot source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: 121d6398991f29b77159b3566c0fccb278191b74
+
+      - name: Check out Grease source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: isomorphisms/grease
+          ref: e963958976eaa80a2517bae3fd34b0e5115ffcbe
+          path: .grease
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install native Android toolchain
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Verify source version before building
+        run: |
+          set -euo pipefail
+          grep -Fq 'requestedVersionCode == null -> 3' android/app/build.gradle.kts
+          grep -Fq '"0.1.2-lasso"' android/app/build.gradle.kts
+
+      - name: Build Lasso Dev APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Verify phone-snapshot identity
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
+          grep -Fqi '27eee69b1cbeebc30eab35fe7eb5459c542784b4ccc68453a372cb6802ccf7cf' /tmp/apksigner.txt
+          "$AAPT2" dump badging "$APK" | tee /tmp/badging.txt
+          grep -Fq "package: name='org.isomorphisms.analyticcontinuation.lasso.dev' versionCode='3' versionName='0.1.2-lasso-dev'" /tmp/badging.txt
+          unzip -l "$APK" | grep -Eq 'res/(mipmap|drawable).*(ic_launcher|ic_lasso)'
+
+      - name: Prepare prerelease assets
+        run: |
+          set -euo pipefail
+          cp android/app/build/outputs/apk/debug/app-debug.apk analytic-continuation-lasso-dev-v0.1.2.apk
+          sha256sum analytic-continuation-lasso-dev-v0.1.2.apk > analytic-continuation-lasso-dev-v0.1.2.apk.sha256
+          unzip -t analytic-continuation-lasso-dev-v0.1.2.apk
+
+      - name: Tag and publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=lasso-dev-v0.1.2
+          SOURCE_SHA=121d6398991f29b77159b3566c0fccb278191b74
+          RELEASE_TITLE='Lasso Dev v0.1.2 — phone snapshot'
+          RELEASE_NOTES="Snapshot of the Lasso Dev build that was actually installed and in use on the phone as of 2026-09-08.
+
+          Android package: org.isomorphisms.analyticcontinuation.lasso.dev
+          Android version: 0.1.2-lasso-dev (versionCode 3)
+          Source commit: ${SOURCE_SHA}
+
+          This preserves the lasso/icon experiment as a known point in the project. The lasso motion is not considered finished; current analytic-continuation work is moving toward the holomorphic soup/stirring exploration, with lasso-style interaction left for later or another project.
+
+          This is a prerelease/sideload build using the repository's permanent non-production Lasso Dev signing identity."
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to replace a historical snapshot."
+            exit 1
+          fi
+
+          gh release create "$TAG" \
+            analytic-continuation-lasso-dev-v0.1.2.apk \
+            analytic-continuation-lasso-dev-v0.1.2.apk.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes "$RELEASE_NOTES" \
+            --prerelease
+
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json url,tagName,isDraft,isPrerelease,publishedAt,targetCommitish,assets \
+            > /tmp/lasso-dev-v0.1.2-release.json
+
+          jq -e --arg expected "$SOURCE_SHA" '
+            .isDraft == false and
+            .isPrerelease == true and
+            .tagName == "lasso-dev-v0.1.2" and
+            .targetCommitish == $expected and
+            ([.assets[].name] | index("analytic-continuation-lasso-dev-v0.1.2.apk") != null) and
+            ([.assets[].name] | index("analytic-continuation-lasso-dev-v0.1.2.apk.sha256") != null)
+          ' /tmp/lasso-dev-v0.1.2-release.json
+          cat /tmp/lasso-dev-v0.1.2-release.json
