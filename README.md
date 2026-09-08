@@ -1,88 +1,55 @@
 # Analytic Continuation
 
-Native Android explorer for a meromorphic complex function whose holomorphic
-freedom stays alive.
+Native Android explorer for a meromorphic complex function whose holomorphic freedom stays alive.
 
-The intended picture is the ordinary Wegert-style complex plane with explicit
-zeros and poles, multiplied by a continuously varying holomorphic/nonvanishing
-factor:
+The picture is the ordinary Wegert-style complex plane with explicit zeros and poles, multiplied by a continuously varying holomorphic/nonvanishing factor:
 
 ```text
 f_t(z) = R(z) H_t(z)
 ```
 
-`R` carries the visible meromorphic divisor.  `H_t` moves through legitimate
-holomorphic states without introducing accidental zeros or poles.  One useful
-experimental family is
+`R` carries the visible meromorphic divisor. `H_t` moves through legitimate holomorphic states without introducing accidental zeros or poles. The current experimental family is
 
 ```text
 H_t(z) = exp(q_t(z))
 ```
 
-but the repository should not confuse one convenient family with a complete
-parameterization of holomorphic functions.
-
-The motion changes the mathematical function, not merely the hue.
+with a small polynomial `q_t`; that convenient family is not intended as a complete parameterization of holomorphic functions. The motion changes the mathematical function, not merely the hue.
 
 ## Direction search
 
-Randomness proposes nearby holomorphic motions.  Before a step is taken, the
-explorer should use analytic information to score candidate directions and
-validate a safe extent.  For an `exp(q)` family,
+Randomness proposes nearby holomorphic motions. Before a step is taken, the explorer uses analytic information to score candidate directions and validates the accepted extent. For the current `exp(q)` family,
 
 ```text
 delta log|H(z)| = Re(delta q(z))
 delta phase(H(z)) = Im(delta q(z))
 ```
 
-so phase/log-modulus sensitivity can guide a preferred direction without using
-RGB finite differences as mathematics.
+so phase/log-modulus sensitivity guides the search without treating RGB or screen-space differences as mathematics.
 
-The search/validation side may publish a compact safe segment or perturbation
-descriptor at a slower cadence while the fragment shader evaluates the accepted
-motion continuously at display cadence.
+The current CPU prototype uses three small search workers and 128 nearby/random candidates per search. Search snapshots run more slowly than display frames; the fragment shader evaluates the accepted coefficients over the whole visible field. A later GPU-native refinement can publish longer safe motion segments instead of advancing coefficients on the CPU each frame.
 
 ## Wegert boundary
 
-[Wegert](https://github.com/isomorphismes/wegert) owns reusable phase-portrait
-behavior and rendering preferences, including the canonical complex-value to
-Wegert-color mapping and ordinary zero/pole interaction pieces.
+[Wegert](https://github.com/isomorphismes/wegert) owns reusable phase-portrait behavior and rendering preferences, including the canonical complex-value to Wegert-color mapping and ordinary zero/pole interaction pieces.
 
-This repository should consume those pieces rather than copy them.  Its own
-responsibility is the evolving holomorphic factor, candidate-direction search,
-mathematical validation, GPU evaluation, and thin Android integration.
+This repository consumes Wegert's exported coloring core and checks it byte-for-byte against Wegert in CI. Its own responsibility is the evolving holomorphic factor, candidate-direction search, mathematical validation, GPU evaluation, and thin Android integration.
 
-The current Android implementation still contains inherited lasso/domain-warp
-machinery inside `analytic_continuation.c`.  That is migration debt, not the
-architecture.  See issue #25 and [`docs/cleanup.md`](docs/cleanup.md).
+The inherited lasso/domain-warp engine has been removed from the live source. The remaining integration cleanup is to replace the app-local ordinary zero/pole interaction code with reusable Wegert components without changing the meromorphic playground itself; see issue #25 and [`docs/cleanup.md`](docs/cleanup.md).
 
 ## Lacunary boundary
 
-[Lacunary](https://github.com/isomorphismes/lacunary) owns the experiments that
-change the domain/chart/continuation problem rather than simply changing the
-holomorphic factor on the ordinary meromorphic plane:
+[Lacunary](https://github.com/isomorphismes/lacunary) owns the experiments that change the domain/chart/continuation problem rather than simply changing the holomorphic factor on the ordinary meromorphic plane:
 
 - lasso and deformed-domain constructions;
 - overlapping convergence discs and reveal geometry;
 - path-dependent germ transport;
 - branches, sheets, monodromy, and broader Riemann-surface experiments.
 
-Those experiments remain valuable, but they no longer define this app.
+Reusable historical mathematics from those experiments has been archived there. Git history here still records the old branches, but none of that machinery is part of the shipping explorer.
 
 ## Runtime
 
-The Android project is under `android/`.  It uses a C `NativeActivity`, EGL, and
-OpenGL ES 3.  No Python runtime or desktop movie renderer owns the live
-interaction.
+The Android project is under `android/`. It uses a C `NativeActivity`, EGL, and OpenGL ES 3. No Python runtime or desktop movie renderer owns the live interaction.
 
-Current host checks include the holomorphic direction-search code and Wegert
-color-parity boundary.  Android build/emulator receipts and target-phone GPU
-receipts remain separate evidence.
-
-## Historical work
-
-Old movie, convergence-disc, lasso, completion, and perturbation experiments
-remain in Git history.  Lasso/disc/path material is being archived or rehomed in
-Lacunary.  Random-holomorphic experiments can still be useful here when they
-advance the live field architecture without reintroducing domain-warp or chart
-machinery.
+Current checks cover the holomorphic direction search, absence of migrated lasso/disc machinery, and the Wegert color boundary. Android emulator evidence and target-phone GPU evidence remain separate.
