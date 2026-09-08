@@ -48,7 +48,7 @@ The current implementation uses a small polynomial `q_t`. That is a finite compu
 
 ## 2. Why `exp(q)` is structural rather than cosmetic
 
-If two meromorphic functions on `C` have the same finite zeros and poles with the same multiplicities, their quotient extends across the cancelled divisor to an entire, nonvanishing function. Every nonvanishing entire function `H` has an entire logarithm: `H'/H` is entire, its integral on the simply connected plane is an entire function `g`, and `H exp(-g)` is a nonzero constant whose logarithm can be absorbed into `g`. Thus `H = exp(q)` for an entire `q`.
+If two nonzero meromorphic functions on `C` have the same finite zeros and poles with the same multiplicities, their quotient extends across the cancelled divisor to an entire, nonvanishing function. Every nonvanishing entire function `H` has an entire logarithm: `H'/H` is entire, its integral on the simply connected plane is an entire function `g`, and `H exp(-g)` is a nonzero constant whose logarithm can be absorbed into `g`. Thus `H = exp(q)` for an entire `q`.
 
 The simply connected hypothesis matters. A nonvanishing holomorphic function on an arbitrary multiply connected domain need not have a single-valued holomorphic logarithm. This contract makes the claim on `C`, not on every domain.
 
