@@ -26,8 +26,9 @@ val uploadSigningConfigured = listOf(
     uploadKeyPassword,
 ).all { !it.isNullOrBlank() }
 
-// Mainline keeps a stable, public Lasso Dev sideload key. F-Droid removes the
-// encoded key before configuring Gradle, so release builds cannot depend on it.
+// This stable public sideload identity predates the repository split. The
+// legacy file/alias names are retained solely so current debug builds can
+// replace older development installs in place; they do not describe a mode.
 val sideloadKeystoreSource = file("debug/lasso-dev.p12.b64")
 val sideloadKeystoreFile = layout.buildDirectory.file("sideload-signing/lasso-dev.p12").get().asFile
 val sideloadSigningAvailable = sideloadKeystoreSource.isFile
@@ -69,7 +70,6 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        // Mainline/Play/F-Droid keep the established application identity.
         applicationId = "org.isomorphisms.analyticcontinuation"
         minSdk = 26
         targetSdk = 36
@@ -110,8 +110,8 @@ android {
 
     buildTypes {
         getByName("debug") {
-            // Preserve the permanent Lasso Dev sideload/update channel when its
-            // public key input is present. F-Droid does not need a debug signer.
+            // Keep the legacy suffix so the corrected explorer can update the
+            // older development APK already installed on test phones.
             applicationIdSuffix = ".lasso.dev"
             versionNameSuffix = "-dev"
             manifestPlaceholders["appLabel"] = "Holomorphic Random Explorer Dev"
