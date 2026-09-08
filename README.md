@@ -16,24 +16,28 @@ H_t(z) = exp(q_t(z))
 
 with a small polynomial `q_t`; that convenient family is not intended as a complete parameterization of holomorphic functions. The motion changes the mathematical function, not merely the hue.
 
+The backend-independent mathematics is specified in [`docs/holomorphic-mathematical-contract.md`](docs/holomorphic-mathematical-contract.md). In particular, whole-plane perturbations in this repository must be entire; bounded-disc kernels with hidden exterior singularities are historical/local constructions rather than the live whole-plane semantics.
+
 ## Direction search
 
-Randomness proposes nearby holomorphic motions. Before a step is taken, the explorer uses analytic information to score candidate directions and validates the accepted extent. For the current `exp(q)` family,
+Randomness may choose local data and motion parameters, but it does not certify holomorphy. The mathematical contract defines canonical least-disturbing directions through normalized reproducing/Riesz representers once the admissible entire function space and the prescribed local value or derivative are fixed.
+
+The current CPU prototype still uses three small search workers and 128 nearby/random coefficient candidates as a provisional computational strategy. That heuristic is not the mathematical definition of the canonical direction. Search snapshots run more slowly than display frames; the fragment shader evaluates the accepted coefficients over the whole visible field.
+
+For the current `exp(q)` family,
 
 ```text
 delta log|H(z)| = Re(delta q(z))
 delta phase(H(z)) = Im(delta q(z))
 ```
 
-so phase/log-modulus sensitivity guides the search without treating RGB or screen-space differences as mathematics.
-
-The current CPU prototype uses three small search workers and 128 nearby/random candidates per search. Search snapshots run more slowly than display frames; the fragment shader evaluates the accepted coefficients over the whole visible field. A later GPU-native refinement can publish longer safe motion segments instead of advancing coefficients on the CPU each frame.
+so exact phase/log-modulus sensitivities are available without treating RGB or screen-space differences as mathematics.
 
 ## Wegert boundary
 
 [Wegert](https://github.com/isomorphismes/wegert) owns reusable phase-portrait behavior and rendering preferences, including the canonical complex-value to Wegert-color mapping and ordinary zero/pole interaction pieces.
 
-This repository consumes Wegert's exported coloring core and checks it byte-for-byte against Wegert in CI. Its own responsibility is the evolving holomorphic factor, candidate-direction search, mathematical validation, GPU evaluation, and thin Android integration.
+This repository consumes Wegert's exported coloring core and checks it byte-for-byte against Wegert in CI. Its own responsibility is the evolving holomorphic factor, mathematical evolution, GPU evaluation, and thin Android integration.
 
 The inherited lasso/domain-warp engine has been removed from the live source. The remaining integration cleanup is to replace the app-local ordinary zero/pole interaction code with reusable Wegert components without changing the meromorphic playground itself; see issue #25 and [`docs/cleanup.md`](docs/cleanup.md).
 
