@@ -139,7 +139,10 @@ digest-locked Wegert phase/log to HCL to sRGB contract. A PPM does not replace
 the raw field or arithmetic receipts.
 
 The application-side checker validates the closed scene, exact provenance,
-framing, dimensions, IDs, payload length, and finite samples:
+framing, dimensions, IDs, payload length, and finite samples. It then gates
+every payload sample against an independently evaluated Binary64
+`R(z) exp(q_t(z))` oracle. Binary64 is host-only acceptance machinery; it does
+not change the generated program's declared Float32 semantics:
 
 ```sh
 python -m acceptance.headless.reference_scene \
@@ -178,11 +181,38 @@ existing color fixture, but it neither performs nor defines generated complex
 arithmetic. Shader floating-point behavior is still accepted at its separately
 declared precision.
 
-The checker deliberately does not invent a numerical tolerance for backend
-transcendentals. The shared complex corpus and each implementation's declared
-Float32 error contract must supply those bounds. Cross-backend comparison
-should compare phase circularly and log magnitude directly before comparing
-Wegert pixels, whose periodic bands have discontinuities.
+The numerical gate is derived rather than fitted to a captured backend run.
+For binary32 unit roundoff `u = 2^-24`, the closed scalar-SSE path contains 196
+rounded scalar operations for this scene: 2 pixel-coordinate operations, 38
+factor-product operations, 40 polynomial operations, 39 complex-exponential
+operations, and 77 remaining projective, division, log, and atan operations.
+Paying that path once for each component gives `n = 392` and
+
+```text
+gamma_n = n*u / (1 - n*u).
+```
+
+The viewport and coefficient L1 envelope prove
+
+```text
+rho = sqrt(3^2 + 2^2) / 6 < 1
+|q(z)| <= 0.72f * rho < pi/4 and < ln(2).
+```
+
+The checker adds analytic next-term/tail bounds for the emitted degree-six
+`exp`, degree-nine/eight `sin`/`cos`, degree-eleven `atan`, and degree-nine
+atanh-series `log` polynomials. It also pays one binary32 unit roundoff for
+each stored polynomial coefficient and the exact difference between the
+emitted one-word binary32 `ln(2)`, `pi/4`, `pi/2`, and `pi` constants and their
+Binary64 oracle values. The log reduction's exponent allowance is derived per
+sample from the oracle log magnitude with two adjacent binary bins for the
+already bounded perturbation. The resulting v1 limits are below `4e-5` radians
+for circular phase error and below `4e-5` for log-magnitude error throughout
+the fixed scene. No observed x86 error participates in either formula.
+
+Thus a correctly framed constant or all-zero payload fails. Cross-backend
+comparison compares phase circularly and log magnitude directly before
+comparing Wegert pixels, whose periodic bands have discontinuities.
 
 ## Ownership
 

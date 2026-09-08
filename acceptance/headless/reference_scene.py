@@ -33,9 +33,52 @@ WEGERT_TAU = 6.28318530717958647692
 WEGERT_LOG_10 = 2.30258509299404568402
 PPM_MAX_VALUE = 255
 
+# The generated v1 scene is a scalar-SSE binary32 program.  These are not
+# fitted tolerances: the operation counts below are obtained directly from the
+# closed lowering described in acceptance/headless/README.md.  The factor
+# product contribution is added from the scene's declared multiplicities.
+F32_UNIT_ROUNDOFF = 2.0**-24
+F32_FIXED_ROUNDED_OPERATIONS = {
+    "pixel_coordinates": 2,
+    "q_horner": 40,
+    "complex_exponential": 39,
+    "numerator_exponential_product": 6,
+    "projective_rescaling": 12,
+    "homogeneous_zero_checks": 6,
+    "scaled_affine_division": 15,
+    "affine_squared_magnitude": 3,
+    "logarithm": 17,
+    "atan2": 18,
+}
+# A real component path is counted once above.  Paying the count once more is
+# the normwise projection allowance for a two-component complex value.
+F32_COMPLEX_PROJECTION_FACTOR = 2
+F32_LN2 = struct.unpack(">f", bytes.fromhex("3f317218"))[0]
+F32_PI_OVER_4 = struct.unpack(">f", bytes.fromhex("3f490fdb"))[0]
+F32_PI_OVER_2 = struct.unpack(">f", bytes.fromhex("3fc90fdb"))[0]
+F32_PI = struct.unpack(">f", bytes.fromhex("40490fdb"))[0]
+
 
 class ContractError(ValueError):
     """The scene or a purported runner result violates the closed contract."""
+
+
+@dataclass(frozen=True)
+class NumericErrorBudget:
+    """Derived absolute error bounds for one phase/log sample.
+
+    ``relative_value`` bounds the perturbation of the computed nonzero complex
+    affine value.  ``phase`` and ``log_magnitude`` additionally include the
+    emitted atan/log approximation and reduction-constant errors.
+    """
+
+    rounded_operations: int
+    gamma: float
+    q_absolute_bound: float
+    transcendental_argument_bound: float
+    relative_value: float
+    phase: float
+    log_magnitude: float
 
 
 def _closed_object(value: Any, keys: set[str], where: str) -> dict[str, Any]:
@@ -148,6 +191,172 @@ def q_value(scene: dict[str, Any], state: dict[str, Any], z: complex) -> complex
         result += decode_complex(words, f"q_coefficients[{index}]") * power
         power *= u
     return result
+
+
+def _gamma(operation_count: int) -> float:
+    """Higham's gamma_n bound for nearest-even binary32 operations."""
+
+    product = operation_count * F32_UNIT_ROUNDOFF
+    if product >= 1.0:
+        raise ContractError("scene has too many rounded operations for a gamma_n bound")
+    return product / (1.0 - product)
+
+
+def _rounded_operation_count(scene: dict[str, Any]) -> int:
+    # Each factor contributes one complex subtraction (two rounded scalar
+    # operations), followed by six rounded scalar operations per complex
+    # multiplication in the declared multiplicity.
+    factor_operations = sum(
+        2 + 6 * factor["multiplicity"]
+        for kind in ("zeros", "poles")
+        for factor in scene["function"][kind]
+    )
+    scalar_path = sum(F32_FIXED_ROUNDED_OPERATIONS.values()) + factor_operations
+    return F32_COMPLEX_PROJECTION_FACTOR * scalar_path
+
+
+def _q_absolute_bound(scene: dict[str, Any]) -> float:
+    """Bound |q(z)| using the coefficient L1 envelope and |z/6| < 1."""
+
+    viewport = scene["viewport"]
+    radius = math.hypot(
+        max(abs(decode_f32(viewport["minimum_real"], "viewport.minimum_real")),
+            abs(decode_f32(viewport["maximum_real"], "viewport.maximum_real"))),
+        max(abs(decode_f32(viewport["minimum_imaginary"], "viewport.minimum_imaginary")),
+            abs(decode_f32(viewport["maximum_imaginary"], "viewport.maximum_imaginary"))),
+    )
+    coordinate_scale = decode_f32(
+        scene["function"]["q"]["coordinate_scale"], "q.coordinate_scale"
+    )
+    rho = radius / coordinate_scale
+    if not 0.0 <= rho < 1.0:
+        raise ContractError("the v1 q bound requires |z / coordinate_scale| < 1")
+    envelope = decode_f32(
+        scene["function"]["q"]["coefficient_envelope"],
+        "q.coefficient_envelope",
+    )
+    # Since q has no constant term and sum |c_k| <= envelope,
+    # sum |c_k| rho^k <= rho * sum |c_k| for rho < 1.
+    return envelope * rho
+
+
+def numeric_error_budget(
+    scene: dict[str, Any], expected_log_magnitude: float
+) -> NumericErrorBudget:
+    """Derive the v1 binary32 acceptance bound for one oracle sample.
+
+    The derivation is deliberately independent of observed backend errors.  It
+    combines a gamma_n roundoff bound for the emitted arithmetic path with
+    analytic Taylor remainders, binary32 coefficient quantization, and the
+    error in the one-word ln(2)/pi reduction constants used by the baseline.
+    """
+
+    operations = _rounded_operation_count(scene)
+    gamma = _gamma(operations)
+    q_bound = _q_absolute_bound(scene)
+    argument_bound = q_bound + gamma * (1.0 + q_bound)
+
+    # exp uses a degree-six Taylor polynomial after ln(2) reduction.  Add the
+    # gamma allowance to q_bound before using it as a conservative argument
+    # radius.  The absolute remainder is converted to relative error with the
+    # minimum possible magnitude.  Coefficient quantization is at most u per
+    # exact coefficient.
+    exp_remainder = (
+        math.exp(argument_bound) * argument_bound**7 / math.factorial(7)
+    )
+    exp_coefficient_error = F32_UNIT_ROUNDOFF * sum(
+        argument_bound**power / math.factorial(power) for power in range(7)
+    )
+    exp_relative_error = (
+        exp_remainder + exp_coefficient_error
+    ) / math.exp(-argument_bound)
+    # |q| < pi/4 forces the scene's sin/cos quadrant to zero, so there is no
+    # nonzero pi/2 subtraction.  The degree-nine/eight Taylor remainders and
+    # quantized coefficients still contribute a normwise unit-circle error.
+    if argument_bound >= math.pi / 4.0:
+        raise ContractError("the v1 sin/cos error proof requires |q| < pi/4")
+    sine_remainder = argument_bound**11 / math.factorial(11)
+    cosine_remainder = argument_bound**10 / math.factorial(10)
+    sine_coefficient_error = F32_UNIT_ROUNDOFF * sum(
+        argument_bound**power / math.factorial(power) for power in range(1, 10, 2)
+    )
+    cosine_coefficient_error = F32_UNIT_ROUNDOFF * sum(
+        argument_bound**power / math.factorial(power) for power in range(0, 9, 2)
+    )
+    sincos_error = math.hypot(
+        sine_remainder + sine_coefficient_error,
+        cosine_remainder + cosine_coefficient_error,
+    )
+    # The exp exponent k is at most one because |q| < ln(2).  Replacing true
+    # ln(2) by its binary32 word therefore perturbs exp by expm1(|delta|).
+    if argument_bound >= math.log(2.0):
+        raise ContractError("the v1 exp reduction proof requires |q| < ln(2)")
+    exp_reduction_error = math.expm1(abs(F32_LN2 - math.log(2.0)))
+
+    # gamma_n controls all rounded arithmetic, including the stable scaled
+    # division.  The (1 + |q|) factor pays for the one additive Horner path.
+    # The remaining terms are relative errors in exp(q)'s complex value.
+    relative_value_error = (
+        gamma * (1.0 + q_bound)
+        + exp_relative_error
+        + sincos_error
+        + exp_reduction_error
+    )
+    if relative_value_error >= 1.0:
+        raise ContractError("derived relative error no longer proves a nonzero value")
+
+    # atan reduces to |t| <= tan(pi/8), then uses the alternating degree-eleven
+    # series.  Its next term is a rigorous truncation bound.  Add binary32
+    # reciprocal-coefficient and worst-path pi-constant quantization errors.
+    atan_radius = math.sqrt(2.0) - 1.0
+    atan_remainder = atan_radius**13 / 13.0
+    atan_coefficient_error = F32_UNIT_ROUNDOFF * sum(
+        atan_radius ** (2 * index + 1) / (2 * index + 1)
+        for index in range(6)
+    )
+    atan_constant_error = (
+        abs(F32_PI_OVER_4 - math.pi / 4.0)
+        + abs(F32_PI_OVER_2 - math.pi / 2.0)
+        + abs(F32_PI - math.pi)
+    )
+    phase_bound = (
+        math.asin(relative_value_error)
+        + atan_remainder
+        + atan_coefficient_error
+        + atan_constant_error
+    )
+
+    # log(m) uses 2*(y+y^3/3+...+y^9/9), |y| <= 1/3.  Bound the omitted
+    # geometric tail, quantized reciprocal coefficients, and the ln(2) word.
+    log_radius = 1.0 / 3.0
+    log_remainder = (
+        2.0
+        * log_radius**11
+        / (11.0 * (1.0 - log_radius * log_radius))
+    )
+    log_coefficient_error = 2.0 * F32_UNIT_ROUNDOFF * sum(
+        log_radius ** (2 * index + 1) / (2 * index + 1)
+        for index in range(5)
+    )
+    # The logarithm sees |f|^2.  Two extra bins cover a boundary crossing from
+    # the already bounded relative perturbation; this is derived per sample.
+    binary_exponent_limit = math.ceil(
+        abs(2.0 * expected_log_magnitude / math.log(2.0))
+    ) + 2
+    log_reduction_error = binary_exponent_limit * abs(F32_LN2 - math.log(2.0))
+    log_bound = (
+        -math.log1p(-relative_value_error)
+        + 0.5 * (log_remainder + log_coefficient_error + log_reduction_error)
+    )
+    return NumericErrorBudget(
+        rounded_operations=operations,
+        gamma=gamma,
+        q_absolute_bound=q_bound,
+        transcendental_argument_bound=argument_bound,
+        relative_value=relative_value_error,
+        phase=phase_bound,
+        log_magnitude=log_bound,
+    )
 
 
 def _factor_product(factors: Iterable[dict[str, Any]], z: complex, where: str) -> complex:
@@ -690,6 +899,34 @@ def verify_output(
         actual = getattr(envelope, field)
         if actual != wanted:
             raise ContractError(f"output {field} is {actual!r}; expected {wanted!r}")
+
+    # Framing and provenance are necessary but not sufficient: compare every
+    # emitted sample with the application-owned Binary64 R(z)*exp(q_t(z))
+    # oracle.  Phase is circular; log magnitude is ordinary absolute error.
+    # Bounds come only from the declared binary32 execution path and analytic
+    # approximation remainders, never from a previously observed run.
+    state = scene_state(scene, state_id)
+    for index, (actual_phase, actual_log) in enumerate(envelope.samples):
+        x = index % envelope.width
+        y = index // envelope.width
+        expected_phase, expected_log = phase_log(
+            homogeneous_value(scene, state, pixel_coordinate(scene, x, y))
+        )
+        budget = numeric_error_budget(scene, expected_log)
+        phase_error = abs(math.remainder(actual_phase - expected_phase, 2.0 * math.pi))
+        log_error = abs(actual_log - expected_log)
+        if phase_error > budget.phase:
+            raise ContractError(
+                f"sample ({x},{y}) phase differs from the Binary64 R*exp(q) "
+                f"oracle by {phase_error:.9g}; derived F32 bound is "
+                f"{budget.phase:.9g}"
+            )
+        if log_error > budget.log_magnitude:
+            raise ContractError(
+                f"sample ({x},{y}) log magnitude differs from the Binary64 "
+                f"R*exp(q) oracle by {log_error:.9g}; derived F32 bound is "
+                f"{budget.log_magnitude:.9g}"
+            )
     return envelope
 
 
@@ -781,7 +1018,8 @@ def _main() -> int:
     print(
         f"valid phase/log envelope: samples={len(envelope.samples)} "
         f"phase=[{min(phases):.9g},{max(phases):.9g}] "
-        f"log_magnitude=[{min(logs):.9g},{max(logs):.9g}]"
+        f"log_magnitude=[{min(logs):.9g},{max(logs):.9g}] "
+        "oracle=Binary64-R*exp(q) tolerance=derived-F32"
     )
     return 0
 

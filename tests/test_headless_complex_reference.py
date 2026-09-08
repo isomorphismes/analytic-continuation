@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import struct
 import tempfile
+from typing import Any
 import unittest
 
 from acceptance.headless.reference_scene import (
@@ -20,7 +21,9 @@ from acceptance.headless.reference_scene import (
     decode_complex,
     homogeneous_value,
     load_scene,
+    numeric_error_budget,
     phase_log,
+    pixel_coordinate,
     projective_classification,
     projective_cross_product,
     q_value,
@@ -47,6 +50,56 @@ def header_text(value: str, width: int) -> bytes:
 
 def rounded_f32(value: float) -> float:
     return struct.unpack(">f", struct.pack(">f", value))[0]
+
+
+def oracle_payload(scene: dict[str, Any], state_id: str) -> bytes:
+    state = scene_state(scene, state_id)
+    width = scene["viewport"]["width"]
+    height = scene["viewport"]["height"]
+    payload = bytearray()
+    for y in range(height):
+        for x in range(width):
+            phase, log_magnitude = phase_log(
+                homogeneous_value(scene, state, pixel_coordinate(scene, x, y))
+            )
+            payload.extend(OUTPUT_SAMPLE.pack(phase, log_magnitude))
+    return bytes(payload)
+
+
+def framed_stream(
+    scene: dict[str, Any],
+    state_id: str,
+    representative_id: str,
+    payload: bytes,
+) -> bytes:
+    state_index = next(
+        index for index, state in enumerate(scene["states"]) if state["id"] == state_id
+    )
+    representative_index = next(
+        index
+        for index, representative in enumerate(scene["representatives"])
+        if representative["id"] == representative_id
+    )
+    width = scene["viewport"]["width"]
+    height = scene["viewport"]["height"]
+    if len(payload) != width * height * OUTPUT_SAMPLE_BYTES:
+        raise AssertionError("test payload has the wrong size")
+    return OUTPUT_HEADER.pack(
+        OUTPUT_MAGIC,
+        OUTPUT_VERSION,
+        OUTPUT_HEADER_BYTES,
+        width,
+        height,
+        state_index,
+        representative_index,
+        OUTPUT_SAMPLE_BYTES,
+        0,
+        hashlib.sha256(SCENE_PATH.read_bytes()).digest(),
+        header_text(scene["scene_id"], 32),
+        header_text(state_id, 24),
+        header_text(representative_id, 24),
+        bytes(8),
+    ) + payload
 
 
 class HeadlessComplexReferenceTests(unittest.TestCase):
@@ -163,28 +216,16 @@ class HeadlessComplexReferenceTests(unittest.TestCase):
                     )
 
     def test_versioned_phase_log_envelope_binds_scene_state_and_representative(self) -> None:
-        scene_digest = hashlib.sha256(SCENE_PATH.read_bytes()).digest()
         width = self.scene["viewport"]["width"]
         height = self.scene["viewport"]["height"]
-        header = OUTPUT_HEADER.pack(
-            OUTPUT_MAGIC,
-            OUTPUT_VERSION,
-            OUTPUT_HEADER_BYTES,
-            width,
-            height,
-            1,
-            1,
-            OUTPUT_SAMPLE_BYTES,
-            0,
-            scene_digest,
-            header_text(self.scene["scene_id"], 32),
-            header_text("deformed", 24),
-            header_text("times-two-i", 24),
-            bytes(8),
+        stream = framed_stream(
+            self.scene,
+            "deformed",
+            "times-two-i",
+            oracle_payload(self.scene, "deformed"),
         )
-        payload = OUTPUT_SAMPLE.pack(0.25, -0.5) * (width * height)
         with tempfile.NamedTemporaryFile() as output:
-            output.write(header + payload)
+            output.write(stream)
             output.flush()
             envelope = verify_output(
                 SCENE_PATH,
@@ -194,7 +235,73 @@ class HeadlessComplexReferenceTests(unittest.TestCase):
                 ROOT,
             )
         self.assertEqual(len(envelope.samples), width * height)
-        self.assertEqual(envelope.samples[0], (0.25, -0.5))
+        expected = phase_log(
+            homogeneous_value(
+                self.scene,
+                scene_state(self.scene, "deformed"),
+                pixel_coordinate(self.scene, 0, 0),
+            )
+        )
+        self.assertEqual(envelope.samples[0], tuple(rounded_f32(item) for item in expected))
+
+    def test_correctly_framed_zero_and_constant_fields_fail_the_oracle_gate(self) -> None:
+        width = self.scene["viewport"]["width"]
+        height = self.scene["viewport"]["height"]
+        sample_count = width * height
+        expected_first = phase_log(
+            homogeneous_value(
+                self.scene,
+                scene_state(self.scene, "deformed"),
+                pixel_coordinate(self.scene, 0, 0),
+            )
+        )
+        impostors = {
+            "all-zero": OUTPUT_SAMPLE.pack(0.0, 0.0) * sample_count,
+            "constant-first-oracle-sample": OUTPUT_SAMPLE.pack(*expected_first)
+            * sample_count,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            for name, payload in impostors.items():
+                with self.subTest(name=name):
+                    field = Path(directory) / f"{name}.field"
+                    field.write_bytes(
+                        framed_stream(
+                            self.scene, "deformed", "identity", payload
+                        )
+                    )
+                    with self.assertRaisesRegex(
+                        ContractError, "differs from the Binary64 R\\*exp\\(q\\) oracle"
+                    ):
+                        verify_output(
+                            SCENE_PATH,
+                            "deformed",
+                            "identity",
+                            field,
+                            ROOT,
+                        )
+
+    def test_float32_error_bound_is_derived_not_fitted_to_backend_output(self) -> None:
+        expected_log = phase_log(
+            homogeneous_value(
+                self.scene,
+                scene_state(self.scene, "deformed"),
+                pixel_coordinate(self.scene, 0, 0),
+            )
+        )[1]
+        budget = numeric_error_budget(self.scene, expected_log)
+        self.assertEqual(budget.rounded_operations, 392)
+        self.assertEqual(budget.gamma, (392 * 2.0**-24) / (1.0 - 392 * 2.0**-24))
+        self.assertLess(budget.q_absolute_bound, math.pi / 4.0)
+        self.assertGreater(
+            budget.transcendental_argument_bound, budget.q_absolute_bound
+        )
+        self.assertLess(budget.transcendental_argument_bound, math.pi / 4.0)
+        self.assertLess(budget.transcendental_argument_bound, math.log(2.0))
+        self.assertGreater(budget.phase, 0.0)
+        self.assertGreater(budget.log_magnitude, 0.0)
+        # This ceiling follows from the formulas, not a captured x86 error.
+        self.assertLess(budget.phase, 4.0e-5)
+        self.assertLess(budget.log_magnitude, 4.0e-5)
 
     def test_render_ppm_rejects_nonfinite_payload_before_opening_output(self) -> None:
         scene_digest = hashlib.sha256(SCENE_PATH.read_bytes()).digest()
@@ -240,34 +347,9 @@ class HeadlessComplexReferenceTests(unittest.TestCase):
             [0, 0, 128, 255, 255],
         )
 
-        scene_digest = hashlib.sha256(SCENE_PATH.read_bytes()).digest()
         width = self.scene["viewport"]["width"]
         height = self.scene["viewport"]["height"]
-        payload = bytearray()
-        for y in range(height):
-            for x in range(width):
-                phase = -math.pi + 2.0 * math.pi * (x + 0.5) / width
-                log_modulus = ((y % 9) - 4) * 0.25
-                payload.extend(OUTPUT_SAMPLE.pack(phase, log_modulus))
-
-        def stream(representative_index: int, representative_id: str) -> bytes:
-            header = OUTPUT_HEADER.pack(
-                OUTPUT_MAGIC,
-                OUTPUT_VERSION,
-                OUTPUT_HEADER_BYTES,
-                width,
-                height,
-                1,
-                representative_index,
-                OUTPUT_SAMPLE_BYTES,
-                0,
-                scene_digest,
-                header_text(self.scene["scene_id"], 32),
-                header_text("deformed", 24),
-                header_text(representative_id, 24),
-                bytes(8),
-            )
-            return header + payload
+        payload = oracle_payload(self.scene, "deformed")
 
         with tempfile.TemporaryDirectory() as directory:
             directory_path = Path(directory)
@@ -275,8 +357,12 @@ class HeadlessComplexReferenceTests(unittest.TestCase):
             rescaled_field = directory_path / "times-two-i.field"
             identity_ppm = directory_path / "identity.ppm"
             rescaled_ppm = directory_path / "times-two-i.ppm"
-            identity_field.write_bytes(stream(0, "identity"))
-            rescaled_field.write_bytes(stream(1, "times-two-i"))
+            identity_field.write_bytes(
+                framed_stream(self.scene, "deformed", "identity", payload)
+            )
+            rescaled_field.write_bytes(
+                framed_stream(self.scene, "deformed", "times-two-i", payload)
+            )
 
             identity_image = render_ppm(
                 SCENE_PATH,
@@ -306,7 +392,7 @@ class HeadlessComplexReferenceTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(identity_image).hexdigest(),
-            "298760dd69db3aa132a7246f2e6d6d756a60016dea32df2e05bb01cddc298add",
+            "8fface9ee8aa17f969a8926941803229e9b1e138da01f7c07262b69760d19d6a",
         )
 
 
