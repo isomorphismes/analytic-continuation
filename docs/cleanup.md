@@ -2,69 +2,99 @@
 
 ## Goal
 
-Reduce the repository to the holomorphic-random explorer that is actually worth
-keeping, while leaving Wegert responsible for coloring, rational factors,
-markers, and the ordinary phase portrait.
+Keep one coherent application:
 
-This cleanup does not erase history. Git retains the discarded experiments.
-The point is to stop treating every false start as a supported live interface.
+```text
+ordinary Wegert-style meromorphic plane
++ explicit zeros and poles
++ continuously varying holomorphic/nonvanishing factor
+```
 
-## Removed in the first cleanup slice
+The function changes continuously while its explicit divisor remains under user
+control.  Rendering preferences and ordinary zero/pole interaction should come
+from reusable Wegert pieces rather than a second copied implementation.
 
-| Removed surface | Reason |
+The lasso/domain-warp, overlapping-disc, and path/sheet/Riemann-surface ideas
+have moved to `isomorphismes/lacunary`.
+
+## Already removed from the live direction
+
+| Surface | Destination / reason |
 | --- | --- |
-| Python `movie-v1` package and CLI | It described a retired renderer contract and did not drive the Android app. |
-| Closed-form function registry and examples | They were reference material for the retired movie/disc-reveal route, not inputs to the live explorer. |
-| Python and C rational disc planners | They revealed discs around a closed-form evaluator but did not transport a germ. Calling them continuation was misleading. Wegert already owns the rational preview. |
-| Copied factor, gesture, snap, and formula-overlay headers that no shipping source included | Their tests created green evidence for dead interfaces. The maintained versions belong in Wegert. |
-| Rigidity and guided-movie plans | They were speculative product directions, not dependencies of the useful experiment. |
+| Python movie/Manim path | Retired; a desktop movie renderer is not the app. |
+| Rational convergence-disc reveal | `lacunary#1`; it changes the local-domain/reveal problem. |
+| Lasso / deformed-domain model | `lacunary#2`; it changes the domain coordinates and inverse-map problem. |
+| Germ/path/branch/monodromy continuation | `lacunary#3`; broader chart/Riemann-surface work. |
 
-## Keep
+Git history retains the old experiments; selected mathematical pieces are being
+archived in Lacunary.
 
-- the native EGL/OpenGL ES application shell;
-- the near-identity degree-six holomorphic map;
-- the three-worker bounded coefficient search until the GPU-wide replacement is
-  accepted;
-- explicit derivative-budget and factor-preimage safety checks used by that
-  experiment;
-- the Wegert color parity fixture while the temporary adapter still exists; and
-- Android build, emulator, and release evidence for the exact APK being tested.
+## Keep here
 
-## Next native extraction
+- native EGL/OpenGL ES Android shell;
+- the ordinary meromorphic zero/pole picture;
+- multiplicity and normal zero/pole editing through reusable Wegert components;
+- canonical Wegert value -> color behavior;
+- random candidate generation for nearby holomorphic motions;
+- pre-step analytic sensitivity scoring / preferred-direction selection;
+- mathematical validation and safe step extent;
+- a compact accepted motion descriptor that the GPU can evaluate continuously;
+- Android, emulator, and target-phone evidence.
 
-The remaining false-start coupling is visible rather than hidden:
+A useful experimental form is
+
+```text
+f_t(z) = R(z) exp(q_t(z))
+```
+
+because `exp(q_t)` is holomorphic and nonzero wherever `q_t` is holomorphic, so
+it cannot change the zero/pole divisor carried by `R`.  This is a convenient
+construction, not a claim that all future holomorphic freedom must be expressed
+as a polynomial exponent.
+
+## Remaining false-start coupling
+
+The current source still has this shape:
 
 ```text
 analytic_continuation_random.c
   includes analytic_continuation.c
-    owns temporary rational factors, markers, lasso UI, and Wegert adapter
+    owns rational factors plus old lasso/domain-warp machinery
 ```
 
-Replace that with three explicit pieces:
+The problem is the lasso/domain-warp coupling and duplicated application code,
+not the existence of zeros and poles.
 
-1. `holomorphic_field`: produces a bounded deformation descriptor or direct
-   phase/log-modulus contribution;
-2. `explorer_shell`: owns Android lifecycle, camera, pause, and touch routing;
-3. `wegert_adapter`: the smallest replaceable boundary needed to display a
-   complex value with Wegert coloring, with no factor editing in this app.
+Replace it with explicit pieces:
 
-The extraction is complete only when:
+1. `holomorphic_field`: proposes/scores/validates nearby holomorphic motion and
+   publishes a safe descriptor;
+2. `explorer_shell`: Android lifecycle, camera, pause, and input routing;
+3. `wegert_adapter`: thin use of exported Wegert coloring and ordinary
+   zero/pole interaction components, without copied palette/factor code.
 
-- the shipping source no longer textually includes another `.c` file;
-- zero/pole placement, dragging, cancellation, markers, and polynomial text are
-  absent from this repository's live interface;
-- no copied Wegert palette or factor implementation can drift here;
-- the APK opens directly into the holomorphic-random explorer;
-- Android Back/system navigation exits; and
-- pause, camera movement, lifecycle restart, and a visible flowing field have
-  on-device evidence.
+## Extraction acceptance
 
-## Future analytic continuation
+The extraction is complete when:
 
-A future continuation mode starts from a base point and Taylor germ, transports
-that germ through overlapping local expansions, and records branch/monodromy
-state. A closed-form evaluator with a disc-shaped reveal mask is only a preview
-and must not occupy that interface.
+- shipping source no longer textually includes another `.c` file;
+- `lasso_map`, inverse-lasso Newton solves, lasso dragging, lasso derivative
+  budgets, and moving factor-preimage state are gone from this app;
+- explicit zero and pole state remains available on the ordinary complex plane;
+- zero/pole UI and coloring are consumed from reusable Wegert components rather
+  than maintained independently here;
+- holomorphic motion is represented independently of domain warping;
+- candidate directions are scored before acceptance using analytic quantities
+  such as phase/log-modulus sensitivity;
+- accepted movement has an explicit safe extent or equivalent validation;
+- the fragment shader evaluates the accepted field at display cadence;
+- pause, pan/zoom, lifecycle restart, zero/pole editing, and visible flowing
+  motion have target-phone evidence.
 
-The repository should not accept new Manim/Manimi runtime work, new rational
-factor UI, or new `refC` dependencies while that boundary is unsettled.
+## Do not reintroduce
+
+- Manim/Manimi runtime or movie-viewer ownership of the app;
+- lasso/domain-warp machinery here;
+- convergence-disc/path/branch state here;
+- copied Wegert rendering math that can drift;
+- new `refC` dependencies.
