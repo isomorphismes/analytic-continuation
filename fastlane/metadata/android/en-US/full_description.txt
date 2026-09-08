@@ -1,5 +1,5 @@
-Holomorphic Random Explorer is a native Android experiment in continuously changing holomorphic maps.
+Holomorphic Random Explorer is a native Android complex-function playground built on Wegert-style domain coloring.
 
-Three small workers search for bounded, low-disturbance changes to a near-identity holomorphic map. The GPU evaluates the moving field for every pixel. Pause and resume the motion or deform the current map directly.
+Place and move explicit zeros and poles on the ordinary complex plane while a separate nonvanishing holomorphic factor changes continuously. Small workers propose nearby coefficient directions and score their analytic phase/log-modulus effect before the app accepts a step. The GPU evaluates the accepted field for every pixel and hands the resulting phase and log modulus to the Wegert coloring core.
 
-The app is not yet a germ-transport or branch-tracking implementation of analytic continuation. It runs natively on the device and contains no generated movie bundle or desktop animation runtime.
+Pause or resume the motion, edit zeros and poles, and pan or zoom the live portrait. Lasso, overlapping-disc, branch-sheet, and broader Riemann-surface experiments live separately in the Lacunary project. The app runs natively on the device and contains no generated movie bundle or desktop animation runtime.

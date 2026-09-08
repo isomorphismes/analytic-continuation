@@ -4,7 +4,7 @@ import android.app.NativeActivity;
 import android.os.Bundle;
 import android.util.Log;
 
-/** Hosts the native EGL/OpenGL ES lasso explorer. */
+/** Hosts the native EGL/OpenGL ES random holomorphic explorer. */
 public final class ExplorerActivity extends NativeActivity {
     private static final String LOG_TAG = "AnalyticContinuation";
 
@@ -15,7 +15,7 @@ public final class ExplorerActivity extends NativeActivity {
 
     @Override
     public void onBackPressed() {
-        Log.i(LOG_TAG, "lasso back requested");
+        Log.i(LOG_TAG, "explorer back requested");
         finish();
     }
 }

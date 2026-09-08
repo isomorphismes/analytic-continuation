@@ -20,12 +20,12 @@ jobs:
         run: >-
           cmp
           android/app/src/main/assets/wegert_color.glsl
-          .wegert-upstream/wegert_color.glsl
+          .wegert-upstream/code/wegert_color.glsl
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests -v
-      - name: Smoke-test three holomorphic workers
+      - name: Smoke-test three holomorphic direction workers
         run: |
           cc -std=c11 -Wall -Wextra -Werror \
             -Iandroid/app/src/main/cpp \
@@ -34,3 +34,7 @@ jobs:
             -pthread -lm \
             -o /tmp/test-holomorphic-walk
           /tmp/test-holomorphic-walk
+      - name: Reject migrated Lacunary machinery in the live app
+        run: |
+          test ! -e android/app/src/main/cpp/analytic_continuation.c
+          ! grep -RniE 'lasso_map|inverse_lasso|dragging_lasso|lasso_coefficients|continuation_path' android/app/src/main/cpp android/app/src/main/assets/continuation.frag.in

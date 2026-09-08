@@ -1,12 +1,12 @@
-# Third-party and referenced material
+# Third-party and reused material
 
-`LICENSE` applies to copyrightable material in this repository only where the repository's contributors have authority to grant that license. Third-party dependencies, platform components, and separately identified material retain their own licenses.
+`LICENSE` applies to copyrightable material in this repository only where the repository's contributors have authority to grant that license. External dependencies, platform components, and separately identified material retain their own licenses.
 
-## mpmath
+## Wegert rendering core
 
-The renderer-independent Python reference model uses mpmath as a dependency. mpmath is distributed under its upstream BSD license. It is not relicensed by this repository.
+The Android shader consumes the renderer-independent Wegert domain-coloring core from the sibling `isomorphisms/wegert` repository. CI compares the vendored build input byte-for-byte with Wegert's exported `code/wegert_color.glsl` so this repository does not silently develop a second palette implementation.
 
-- https://github.com/mpmath/mpmath
+- https://github.com/isomorphisms/wegert
 
 ## Platform and toolchain
 

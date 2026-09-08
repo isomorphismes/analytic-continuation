@@ -132,14 +132,30 @@ class WegertColorParityTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertNotIn(token, template)
 
+    def test_meromorphic_and_holomorphic_value_is_complete_before_color_oracle(self) -> None:
+        template = TEMPLATE_PATH.read_text()
+        color_boundary = template.index(WEGERT_CALL)
+        value_tokens = (
+            "phase += atan(delta.y, delta.x);",
+            "log_modulus += 0.5 * log(radius_squared);",
+            "phase -= atan(delta.y, delta.x);",
+            "log_modulus -= 0.5 * log(radius_squared);",
+            "vec2 q = holomorphic_q(z);",
+            "log_modulus += q.x;",
+            "phase += q.y;",
+        )
+        for token in value_tokens:
+            with self.subTest(token=token):
+                self.assertLess(template.index(token), color_boundary)
+
     def test_app_overlays_are_outside_value_to_color_oracle(self) -> None:
         template = TEMPLATE_PATH.read_text()
         color_boundary = template.index(WEGERT_CALL)
         overlay_tokens = (
-            "color = mix(color, vec3(0.97, 0.97, 0.94), boundary);",
-            "length(z - u_zero_positions[index])",
-            "length(z - u_pole_positions[index])",
+            "float mark = ring_mask(gl_FragCoord.xy, center, 9.0, 5.0);",
+            "float pause_disk = circle_mask(gl_FragCoord.xy, pause_center, pause_radius);",
             "bool zero_selected = u_placement_kind == 0;",
+            "float zero_disk = circle_mask(gl_FragCoord.xy, zero_center, placement_radius);",
         )
         for token in overlay_tokens:
             with self.subTest(token=token):
