@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Remove non-F-Droid signing input
+      - name: Remove legacy development sideload key
         run: rm -f android/app/debug/lasso-dev.p12.b64
 
       - uses: actions/setup-java@v4
