@@ -123,9 +123,9 @@ jobs:
             adb logcat -d > holomorphic-emulator.log
             grep -Fq 'holomorphic field paused' holomorphic-emulator.log
 
-            set -- $(sed -n 's/.*holomorphic field ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' holomorphic-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; placement_radius=$((48 * min_side / 1000)); if [ "$placement_radius" -lt 26 ]; then placement_radius=26; fi; if [ "$placement_radius" -gt 38 ]; then placement_radius=38; fi; zero_control_x=$((placement_radius + 16)); control_y=$((height - placement_radius - 16)); pole_control_x=$((zero_control_x + 2 * placement_radius + 14)); adb shell input tap "$zero_control_x" "$control_y"; adb shell input tap "$((width / 2 - 100))" "$((height / 2 + 80))"
+            set -- $(sed -n 's/.*holomorphic field ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' holomorphic-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; placement_radius=$((48 * min_side / 1000)); if [ "$placement_radius" -lt 26 ]; then placement_radius=26; fi; if [ "$placement_radius" -gt 38 ]; then placement_radius=38; fi; zero_control_x=$((placement_radius + 16)); control_y=$((height - placement_radius - 16)); pole_control_x=$((zero_control_x + 2 * placement_radius + 14)); adb shell input tap "$zero_control_x" "$control_y"; adb shell input tap "$((width / 2 - 100))" "$((height / 2 + 80))"; printf '%s %s %s %s\n' "$pole_control_x" "$control_y" "$width" "$height" > /tmp/holomorphic-placement-coordinates
             sleep 1
-            adb shell input tap "$pole_control_x" "$control_y"; adb shell input tap "$((width / 2 + 120))" "$((height / 2 - 70))"
+            read pole_control_x control_y width height < /tmp/holomorphic-placement-coordinates; adb shell input tap "$pole_control_x" "$control_y"; adb shell input tap "$((width / 2 + 120))" "$((height / 2 - 70))"
             sleep 1
             adb logcat -d > holomorphic-emulator.log
             grep -Fq 'placement selected: pole' holomorphic-emulator.log
