@@ -61,7 +61,6 @@ struct engine {
     GLint zero_positions_location;
     GLint pole_positions_location;
     GLint holomorphic_coefficients_location;
-    GLint paused_location;
     GLint zoom_location;
     GLint placement_kind_location;
 
@@ -79,7 +78,7 @@ struct engine {
     uint64_t deformation_accepted_steps;
     bool deformation_workers_started;
     bool deformation_direction_ready;
-    bool paused;
+    bool focused;
 
     float zoom;
     float pinch_start_distance;
@@ -122,7 +121,7 @@ static void initialize_state(struct engine *engine) {
     engine->deformation_accepted_steps = 0;
     engine->deformation_workers_started = false;
     engine->deformation_direction_ready = false;
-    engine->paused = false;
+    engine->focused = false;
 
     engine->zoom = 1.0f;
     engine->pinch_start_distance = 0.0f;
@@ -256,7 +255,6 @@ static bool create_renderer(struct engine *engine) {
     engine->holomorphic_coefficients_location = glGetUniformLocation(
         engine->program, "u_holomorphic_coefficients[0]"
     );
-    engine->paused_location = glGetUniformLocation(engine->program, "u_paused");
     engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
     engine->placement_kind_location = glGetUniformLocation(engine->program, "u_placement_kind");
 
@@ -265,8 +263,7 @@ static bool create_renderer(struct engine *engine) {
         engine->pole_count_location < 0 || engine->zero_positions_location < 0 ||
         engine->pole_positions_location < 0 ||
         engine->holomorphic_coefficients_location < 0 ||
-        engine->paused_location < 0 || engine->zoom_location < 0 ||
-        engine->placement_kind_location < 0
+        engine->zoom_location < 0 || engine->placement_kind_location < 0
     ) {
         LOGE("holomorphic field shader uniforms unavailable");
         return false;
@@ -446,7 +443,6 @@ static void draw_frame(struct engine *engine) {
         HOLOMORPHIC_WALK_COEFFICIENT_COUNT,
         &engine->holomorphic_coefficients[0][0]
     );
-    glUniform1i(engine->paused_location, engine->paused ? 1 : 0);
     glUniform1f(engine->zoom_location, engine->zoom);
     glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
 
@@ -483,23 +479,11 @@ static void screen_to_plane(
     output[1] = (0.5f * (float)engine->height - y) / scale;
 }
 
-static float control_radius(const struct engine *engine) {
-    float radius = 0.052f * fminf((float)engine->width, (float)engine->height);
-    if (radius < 28.0f) radius = 28.0f;
-    if (radius > 42.0f) radius = 42.0f;
-    return radius;
-}
-
 static float placement_radius(const struct engine *engine) {
     float radius = 0.048f * fminf((float)engine->width, (float)engine->height);
     if (radius < 26.0f) radius = 26.0f;
     if (radius > 38.0f) radius = 38.0f;
     return radius;
-}
-
-static bool pause_control_contains(const struct engine *engine, float x, float y) {
-    float radius = control_radius(engine);
-    return hypotf(x - radius - 16.0f, y - radius - 16.0f) <= radius;
 }
 
 static bool placement_control_hit(
@@ -618,13 +602,6 @@ static void add_factor(
     LOGI("%s added: z=%.6g%+.6gi count=%d", name, point[0], point[1], *count);
 }
 
-static void toggle_holomorphic_pause(struct engine *engine) {
-    engine->paused = !engine->paused;
-    engine->deformation_last_time = monotonic_seconds();
-    engine->dirty = true;
-    LOGI("holomorphic field %s", engine->paused ? "paused" : "running");
-}
-
 static void publish_deformation_snapshot(struct engine *engine, double now) {
     if (!engine->deformation_workers_started) {
         return;
@@ -666,7 +643,7 @@ static void advance_holomorphic_function(struct engine *engine) {
     }
 
     publish_deformation_snapshot(engine, now);
-    if (engine->paused || engine->dragging_factor || engine->pinching) {
+    if (!engine->focused || engine->dragging_factor || engine->pinching) {
         return;
     }
 
@@ -676,8 +653,8 @@ static void advance_holomorphic_function(struct engine *engine) {
         engine->deformation_workers_started &&
         holomorphic_walk_best_direction(direction, &score)
     ) {
-        float blend = 1.0f - expf(-3.2f * dt);
-        const float speed = 0.105f;
+        float blend = 1.0f - expf(-4.0f * dt);
+        const float speed = 0.30f;
         for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
             engine->deformation_velocity[index][0] =
                 (1.0f - blend) * engine->deformation_velocity[index][0] +
@@ -781,13 +758,6 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
             float x = AMotionEvent_getX(event, 0);
             float y = AMotionEvent_getY(event, 0);
             engine->suppress_tap = false;
-
-            if (pause_control_contains(engine, x, y)) {
-                toggle_holomorphic_pause(engine);
-                clear_gesture(engine);
-                engine->suppress_tap = true;
-                return 1;
-            }
 
             enum placement_kind selected;
             if (placement_control_hit(engine, x, y, &selected)) {
@@ -913,8 +883,12 @@ static void handle_command(struct android_app *app, int32_t command) {
             update_surface_size(engine);
             break;
         case APP_CMD_GAINED_FOCUS:
+            engine->focused = true;
             engine->deformation_last_time = monotonic_seconds();
             engine->dirty = true;
+            break;
+        case APP_CMD_LOST_FOCUS:
+            engine->focused = false;
             break;
         default:
             break;
@@ -953,7 +927,7 @@ void android_main(struct android_app *app) {
     while (true) {
         int events = 0;
         struct android_poll_source *source = NULL;
-        bool can_animate = engine.display != EGL_NO_DISPLAY && !engine.paused;
+        bool can_animate = engine.display != EGL_NO_DISPLAY && engine.focused;
         int timeout = can_animate ? 16 : (engine.dirty ? 0 : -1);
         int ident = ALooper_pollOnce(timeout, NULL, &events, (void **)&source);
 
@@ -968,7 +942,7 @@ void android_main(struct android_app *app) {
             terminate_display(&engine);
             return;
         }
-        if (engine.display != EGL_NO_DISPLAY) {
+        if (engine.display != EGL_NO_DISPLAY && engine.focused) {
             advance_holomorphic_function(&engine);
         }
         if (engine.dirty) {
