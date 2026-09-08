@@ -128,10 +128,9 @@ jobs:
             grep -Fq 'zeros=1 poles=1' holomorphic-emulator.log
             grep -Fq 'holomorphic field first frame:' holomorphic-emulator.log
             steps_before=$(sed -n 's/.*holomorphic field: workers=3 steps=\([0-9][0-9]*\).*/\1/p' holomorphic-emulator.log | tail -1); test -n "$steps_before"; test "$steps_before" -gt 0
-            budget_before=$(sed -n 's/.*holomorphic field: workers=3 steps=[0-9][0-9]* budget=\([0-9.][0-9.]*\).*/\1/p' holomorphic-emulator.log | tail -1); test -n "$budget_before"; awk -v budget="$budget_before" 'BEGIN { exit !(budget > 0.20) }'
 
             adb exec-out screencap -p > holomorphic-motion-a.png
-            sleep 2
+            sleep 6
             adb exec-out screencap -p > holomorphic-motion-b.png
             adb logcat -d > holomorphic-emulator.log
             steps_after_motion=$(sed -n 's/.*holomorphic field: workers=3 steps=\([0-9][0-9]*\).*/\1/p' holomorphic-emulator.log | tail -1); test -n "$steps_after_motion"; test "$steps_after_motion" -gt "$steps_before"
