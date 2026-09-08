@@ -31,6 +31,7 @@ static struct walk_state walk = {
     .changed = PTHREAD_COND_INITIALIZER
 };
 
+/* Samples are in the normalized entire coordinate u = z / 6. */
 static const float disturbance_samples[DISTURBANCE_SAMPLE_COUNT][2] = {
     { 0.00f,  0.00f},
     { 0.18f,  0.07f},
@@ -77,23 +78,29 @@ static void complex_multiply(
     output[1] = left_x * right_y + left_y * right_x;
 }
 
+float holomorphic_walk_coefficient_budget(
+    const float coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2]
+) {
+    float budget = 0.0f;
+    for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
+        budget += hypotf(coefficients[index][0], coefficients[index][1]);
+    }
+    return budget;
+}
+
 static float normalize_direction(
     float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2]
 ) {
-    float derivative_norm = 0.0f;
-    for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-        float degree = (float)(index + 2);
-        derivative_norm += degree * hypotf(direction[index][0], direction[index][1]);
-    }
-    if (derivative_norm < 1.0e-7f) {
+    float norm = holomorphic_walk_coefficient_budget(direction);
+    if (norm < 1.0e-7f) {
         return 0.0f;
     }
-    float inverse = 1.0f / derivative_norm;
+    float inverse = 1.0f / norm;
     for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
         direction[index][0] *= inverse;
         direction[index][1] *= inverse;
     }
-    return derivative_norm;
+    return norm;
 }
 
 static void random_direction(
@@ -108,54 +115,52 @@ static void random_direction(
     } while (normalize_direction(direction) == 0.0f);
 }
 
+/*
+ * q(u) = c1 u + ... + c5 u^5.
+ * A coefficient direction d therefore changes the displayed holomorphic factor
+ * H = exp(q) by
+ *
+ *   delta log|H| = Re(delta q)
+ *   delta phase(H) = Im(delta q).
+ *
+ * These are the analytic sensitivities scored before a direction is accepted.
+ */
 static void direction_at(
     const float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2],
-    float w_x,
-    float w_y,
-    float displacement[2],
-    float derivative[2]
+    float u_x,
+    float u_y,
+    float delta_q[2],
+    float delta_q_derivative[2]
 ) {
-    displacement[0] = 0.0f;
-    displacement[1] = 0.0f;
-    derivative[0] = 0.0f;
-    derivative[1] = 0.0f;
+    delta_q[0] = 0.0f;
+    delta_q[1] = 0.0f;
+    delta_q_derivative[0] = 0.0f;
+    delta_q_derivative[1] = 0.0f;
 
-    float power[2] = {w_x, w_y};
+    float power[2] = {1.0f, 0.0f};
     for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-        int degree = index + 2;
+        int degree = index + 1;
         float next_power[2];
-        complex_multiply(power[0], power[1], w_x, w_y, next_power);
+        complex_multiply(power[0], power[1], u_x, u_y, next_power);
 
         float term[2];
         complex_multiply(
             direction[index][0], direction[index][1],
             next_power[0], next_power[1], term
         );
-        displacement[0] += term[0];
-        displacement[1] += term[1];
+        delta_q[0] += term[0];
+        delta_q[1] += term[1];
 
         complex_multiply(
             direction[index][0], direction[index][1],
             power[0], power[1], term
         );
-        derivative[0] += (float)degree * term[0];
-        derivative[1] += (float)degree * term[1];
+        delta_q_derivative[0] += (float)degree * term[0];
+        delta_q_derivative[1] += (float)degree * term[1];
 
         power[0] = next_power[0];
         power[1] = next_power[1];
     }
-}
-
-static float coefficient_budget(
-    const float coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2]
-) {
-    float budget = 0.0f;
-    for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-        budget += (float)(index + 2) * hypotf(
-            coefficients[index][0], coefficients[index][1]
-        );
-    }
-    return budget;
 }
 
 static float outward_budget_slope(
@@ -168,11 +173,10 @@ static float outward_budget_slope(
         if (radius < 1.0e-5f) {
             continue;
         }
-        float along = (
+        slope += (
             coefficients[index][0] * direction[index][0] +
             coefficients[index][1] * direction[index][1]
         ) / radius;
-        slope += (float)(index + 2) * along;
     }
     return slope;
 }
@@ -183,48 +187,46 @@ static float disturbance_score(
 ) {
     float score = 0.0f;
     for (int sample = 0; sample < DISTURBANCE_SAMPLE_COUNT; ++sample) {
-        float displacement[2];
-        float derivative[2];
+        float delta_q[2];
+        float delta_q_derivative[2];
         direction_at(
             direction,
             disturbance_samples[sample][0], disturbance_samples[sample][1],
-            displacement, derivative
+            delta_q, delta_q_derivative
         );
         float radius_squared =
             disturbance_samples[sample][0] * disturbance_samples[sample][0] +
             disturbance_samples[sample][1] * disturbance_samples[sample][1];
         float weight = 0.65f + 0.55f * radius_squared;
+
+        /* Re(delta_q) and Im(delta_q) are log-modulus/phase sensitivities. */
         score += weight * (
-            displacement[0] * displacement[0] +
-            displacement[1] * displacement[1]
+            delta_q[0] * delta_q[0] + delta_q[1] * delta_q[1]
         );
-        score += 0.075f * weight * (
-            derivative[0] * derivative[0] + derivative[1] * derivative[1]
+        score += 0.050f * weight * (
+            delta_q_derivative[0] * delta_q_derivative[0] +
+            delta_q_derivative[1] * delta_q_derivative[1]
         );
     }
     score /= (float)DISTURBANCE_SAMPLE_COUNT;
 
-    float budget = coefficient_budget(coefficients);
+    float budget = holomorphic_walk_coefficient_budget(coefficients);
     float slope = outward_budget_slope(coefficients, direction);
-    if (budget > 0.62f && slope > 0.0f) {
-        float closeness = (budget - 0.62f) / 0.26f;
+    if (budget > 0.52f && slope > 0.0f) {
+        float closeness = (budget - 0.52f) /
+            (HOLOMORPHIC_WALK_COEFFICIENT_BUDGET - 0.52f);
         score += 0.7f * closeness * closeness * slope * slope;
     }
     return score;
 }
 
 static void search_direction(
-    int worker_index,
-    uint64_t generation,
     const float coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2],
     float heading[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2],
     float best_direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2],
     float *best_score,
     uint32_t *random_state
 ) {
-    (void)worker_index;
-    (void)generation;
-
     *best_score = INFINITY;
     for (int candidate_index = 0; candidate_index < SEARCH_CANDIDATES; ++candidate_index) {
         float candidate[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
@@ -249,7 +251,11 @@ static void search_direction(
     }
 
     if (isfinite(*best_score)) {
-        memcpy(heading, best_direction, sizeof(float) * HOLOMORPHIC_WALK_COEFFICIENT_COUNT * 2u);
+        memcpy(
+            heading,
+            best_direction,
+            sizeof(float) * HOLOMORPHIC_WALK_COEFFICIENT_COUNT * 2u
+        );
     }
 }
 
@@ -278,15 +284,7 @@ static void *worker_main(void *argument) {
 
         float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
         float score;
-        search_direction(
-            worker->index,
-            generation,
-            coefficients,
-            heading,
-            direction,
-            &score,
-            &random_state
-        );
+        search_direction(coefficients, heading, direction, &score, &random_state);
 
         pthread_mutex_lock(&walk.mutex);
         if (!walk.stop && generation >= worker->result_generation && isfinite(score)) {
