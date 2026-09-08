@@ -14,18 +14,8 @@ static void sleep_milliseconds(long milliseconds) {
     nanosleep(&delay, NULL);
 }
 
-static float derivative_norm(
-    const float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2]
-) {
-    float norm = 0.0f;
-    for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-        norm += (float)(index + 2) * hypotf(direction[index][0], direction[index][1]);
-    }
-    return norm;
-}
-
 int main(void) {
-    _Static_assert(HOLOMORPHIC_WALK_WORKER_COUNT == 3, "the deformation must keep three workers");
+    _Static_assert(HOLOMORPHIC_WALK_WORKER_COUNT == 3, "keep three search workers for the current CPU prototype");
 
     float coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2] = {{0.0f, 0.0f}};
     float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
@@ -58,9 +48,14 @@ int main(void) {
         return 1;
     }
 
-    float norm = derivative_norm(direction);
+    float norm = holomorphic_walk_coefficient_budget(direction);
     if (!isfinite(norm) || fabsf(norm - 1.0f) > 1.0e-3f) {
         fprintf(stderr, "worker direction is not normalized: %.9g\n", norm);
+        return 1;
+    }
+
+    if (holomorphic_walk_coefficient_budget(coefficients) > HOLOMORPHIC_WALK_COEFFICIENT_BUDGET) {
+        fputs("zero coefficient state somehow exceeds the budget\n", stderr);
         return 1;
     }
 
