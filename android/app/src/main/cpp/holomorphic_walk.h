@@ -5,7 +5,7 @@
 
 #define HOLOMORPHIC_WALK_COEFFICIENT_COUNT 5
 #define HOLOMORPHIC_WALK_WORKER_COUNT 3
-#define HOLOMORPHIC_WALK_COEFFICIENT_BUDGET 0.72f
+#define HOLOMORPHIC_WALK_COEFFICIENT_BUDGET 1.20f
 
 bool holomorphic_walk_start(void);
 void holomorphic_walk_stop(void);
