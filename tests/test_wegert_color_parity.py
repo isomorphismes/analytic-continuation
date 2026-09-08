@@ -153,13 +153,18 @@ class WegertColorParityTests(unittest.TestCase):
         color_boundary = template.index(WEGERT_CALL)
         overlay_tokens = (
             "float mark = ring_mask(gl_FragCoord.xy, center, 9.0, 5.0);",
-            "float pause_disk = circle_mask(gl_FragCoord.xy, pause_center, pause_radius);",
             "bool zero_selected = u_placement_kind == 0;",
             "float zero_disk = circle_mask(gl_FragCoord.xy, zero_center, placement_radius);",
         )
         for token in overlay_tokens:
             with self.subTest(token=token):
                 self.assertGreater(template.index(token), color_boundary)
+
+    def test_pause_overlay_is_absent(self) -> None:
+        template = TEMPLATE_PATH.read_text()
+        self.assertNotIn("u_paused", template)
+        self.assertNotIn("pause_center", template)
+        self.assertNotIn("pause_disk", template)
 
     def test_canonical_core_contains_no_app_overlay_state(self) -> None:
         core = CORE_PATH.read_text()
