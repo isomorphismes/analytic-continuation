@@ -57,3 +57,9 @@ Reusable historical mathematics from those experiments has been archived there. 
 The Android project is under `android/`. It uses a C `NativeActivity`, EGL, and OpenGL ES 3. No Python runtime or desktop movie renderer owns the live interaction.
 
 Current checks cover the holomorphic direction search, absence of migrated lasso/disc machinery, and the Wegert color boundary. Android emulator evidence and target-phone GPU evidence remain separate.
+
+The application-owned deterministic scene and direct-backend output contract
+are under [`acceptance/headless/`](acceptance/headless/). They exercise fixed
+`R(z) exp(q_t(z))` states and CP1 codomain representatives without making
+Android timing or the historical domain experiments part of the arithmetic
+oracle.

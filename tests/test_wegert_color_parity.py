@@ -7,6 +7,8 @@ import math
 from pathlib import Path
 import unittest
 
+from acceptance.headless.reference_scene import wegert_color_from_phase_log_modulus
+
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = ROOT / "tests" / "fixtures" / "wegert_color_values.json"
@@ -16,59 +18,10 @@ WEGERT_MARKER = "/*__WEGERT_COLOR_CORE__*/"
 WEGERT_CALL = "vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);"
 
 
-def positive_fract(value: float) -> float:
-    return value - math.floor(value)
-
-
-def srgb_component(linear_value: float) -> float:
-    value = max(linear_value, 0.0)
-    if value <= 0.0031308:
-        return 12.92 * value
-    return 1.055 * value ** (1.0 / 2.4) - 0.055
-
-
-def hcl_to_srgb(hue_degrees: float, chroma: float, lightness: float) -> tuple[float, float, float]:
-    hue = math.radians(hue_degrees)
-    u_star = chroma * math.cos(hue)
-    v_star = chroma * math.sin(hue)
-
-    white_u_prime = 0.19783982482140777
-    white_v_prime = 0.46833630293240974
-
-    if lightness > 8.0:
-        y = ((lightness + 16.0) / 116.0) ** 3.0
-    else:
-        y = lightness / 903.2962962962963
-
-    u_prime = u_star / (13.0 * lightness) + white_u_prime
-    v_prime = v_star / (13.0 * lightness) + white_v_prime
-
-    x = (9.0 * y * u_prime) / (4.0 * v_prime)
-    z = y * (12.0 - 3.0 * u_prime - 20.0 * v_prime) / (4.0 * v_prime)
-
-    linear_r = 3.2404542 * x - 1.5371385 * y - 0.4985314 * z
-    linear_g = -0.9692660 * x + 1.8760108 * y + 0.0415560 * z
-    linear_b = 0.0556434 * x - 0.2040259 * y + 1.0572252 * z
-
-    return tuple(
-        min(max(srgb_component(component), 0.0), 1.0)
-        for component in (linear_r, linear_g, linear_b)
-    )
-
-
 def canonical_wegert_color(value: complex) -> tuple[float, float, float]:
-    tau = 6.28318530717958647692
-    log_10 = 2.30258509299404568402
     phase = math.atan2(value.imag, value.real)
     log_modulus = math.log(max(abs(value), 1.0e-12))
-    hue_degrees = 360.0 * positive_fract(phase / tau)
-    log_modulus_band = positive_fract(log_modulus / log_10)
-    lightness = (
-        66.0
-        + 4.0 * log_modulus_band
-        + 3.0 * positive_fract(hue_degrees / 100.0)
-    )
-    return hcl_to_srgb(hue_degrees, 45.0, lightness)
+    return wegert_color_from_phase_log_modulus(phase, log_modulus)
 
 
 class WegertColorParityTests(unittest.TestCase):

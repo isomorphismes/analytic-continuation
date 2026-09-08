@@ -1,0 +1,134 @@
+{
+  "schema": "analytic-continuation/headless-complex-reference/v1",
+  "scene_id": "meromorphic-exp-cp1-f32",
+  "scalar": {
+    "type": "Float32",
+    "parameter_encoding": "ieee-754-binary32-hex",
+    "rounding": "round-to-nearest-ties-to-even"
+  },
+  "viewport": {
+    "width": 96,
+    "height": 64,
+    "row_order": "top-to-bottom",
+    "sample_location": "pixel-centers",
+    "real_sample": "(2*x - 95) / 32",
+    "imaginary_sample": "(63 - 2*y) / 32",
+    "minimum_real": "0xc0400000",
+    "maximum_real": "0x40400000",
+    "minimum_imaginary": "0xc0000000",
+    "maximum_imaginary": "0x40000000"
+  },
+  "function": {
+    "model": "f_t(z) = R(z) exp(q_t(z))",
+    "gain": ["0x3f800000", "0x00000000"],
+    "zeros": [
+      {
+        "position": ["0xbf400000", "0x3e800000"],
+        "multiplicity": 1
+      },
+      {
+        "position": ["0x3f200000", "0xbf000000"],
+        "multiplicity": 2
+      }
+    ],
+    "poles": [
+      {
+        "position": ["0xbe800000", "0xbf600000"],
+        "multiplicity": 1
+      },
+      {
+        "position": ["0x3f900000", "0x3f400000"],
+        "multiplicity": 1
+      }
+    ],
+    "q": {
+      "coordinate": "u = z / 6",
+      "coordinate_scale": "0x40c00000",
+      "constant_term": "omitted",
+      "coefficient_envelope": "0x3f3851ec",
+      "coefficient_order": ["u", "u^2", "u^3", "u^4", "u^5"]
+    }
+  },
+  "states": [
+    {
+      "id": "still",
+      "t": "0x00000000",
+      "q_coefficients": [
+        ["0x00000000", "0x00000000"],
+        ["0x00000000", "0x00000000"],
+        ["0x00000000", "0x00000000"],
+        ["0x00000000", "0x00000000"],
+        ["0x00000000", "0x00000000"]
+      ]
+    },
+    {
+      "id": "deformed",
+      "t": "0x3f800000",
+      "q_coefficients": [
+        ["0x3e800000", "0x3e000000"],
+        ["0xbe000000", "0x3e400000"],
+        ["0x3d800000", "0xbdc00000"],
+        ["0xbd000000", "0x3d400000"],
+        ["0x3c800000", "0x3c800000"]
+      ]
+    }
+  ],
+  "projective_codomain": {
+    "space": "CP1",
+    "affine_embedding": "f -> [1:f]",
+    "homogeneous_value": "[Q(z):N_t(z)]",
+    "numerator": "N_t(z) = product_a (z-a)^multiplicity * exp(q_t(z))",
+    "denominator": "Q(z) = product_b (z-b)^multiplicity",
+    "affine_chart": "N_t(z) / Q(z) when Q(z) is nonzero",
+    "common_factor_policy": "reject-unreduced-input",
+    "all_zero_policy": "reject"
+  },
+  "representatives": [
+    {
+      "id": "identity",
+      "scale": ["0x3f800000", "0x00000000"]
+    },
+    {
+      "id": "times-two-i",
+      "scale": ["0x00000000", "0x40000000"]
+    }
+  ],
+  "projective_probes": [
+    {
+      "id": "regular-origin",
+      "z": ["0x00000000", "0x00000000"],
+      "expected": "finite-nonzero"
+    },
+    {
+      "id": "simple-zero",
+      "z": ["0xbf400000", "0x3e800000"],
+      "expected": "zero"
+    },
+    {
+      "id": "double-zero",
+      "z": ["0x3f200000", "0xbf000000"],
+      "expected": "zero"
+    },
+    {
+      "id": "first-pole",
+      "z": ["0xbe800000", "0xbf600000"],
+      "expected": "infinity"
+    },
+    {
+      "id": "second-pole",
+      "z": ["0x3f900000", "0x3f400000"],
+      "expected": "infinity"
+    }
+  ],
+  "render": {
+    "field_format": "phase_log_f32le",
+    "phase": "principal argument of N_t(z) / Q(z)",
+    "log_magnitude": "log(abs(N_t(z))) - log(abs(Q(z)))",
+    "interaction_overlays": false,
+    "wegert_color_contract": {
+      "repository": "isomorphismes/wegert",
+      "path": "code/wegert_color.glsl",
+      "sha256": "f30991435214135aa8a4c42798ff4ccc10ebc28db3b03d275d546ba203bad364"
+    }
+  }
+}
