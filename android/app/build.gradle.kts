@@ -41,26 +41,35 @@ if (sideloadSigningAvailable && !sideloadKeystoreFile.exists()) {
 
 val wegertColorMarker = "/*__WEGERT_COLOR_CORE__*/"
 val generatedWegertAssets = layout.buildDirectory.dir("generated/wegert-assets")
-val assembleContinuationShader = tasks.register("assembleContinuationShader") {
-    val template = file("src/main/assets/continuation.frag.in")
+val assembleContinuationShaders = tasks.register("assembleContinuationShaders") {
+    val templates = listOf(
+        file("src/main/assets/continuation.frag.in") to "continuation.frag",
+        file("src/main/assets/continuation_remote.frag.in") to "continuation_remote.frag",
+    )
     val colorCore = file("src/main/assets/wegert_color.glsl")
-    val output = generatedWegertAssets.map { it.file("continuation.frag") }
+    val outputs = templates.map { (_, outputName) ->
+        generatedWegertAssets.map { it.file(outputName) }
+    }
 
-    inputs.files(template, colorCore)
-    outputs.file(output)
+    inputs.files(templates.map { it.first } + colorCore)
+    outputs.files(outputs)
 
     doLast {
-        val templateText = template.readText()
-        check(templateText.contains(wegertColorMarker)) {
-            "Continuation fragment template is missing the Wegert coloring-core marker"
-        }
-        check(templateText.indexOf(wegertColorMarker) == templateText.lastIndexOf(wegertColorMarker)) {
-            "Continuation fragment template must contain exactly one Wegert coloring-core marker"
-        }
+        val colorText = colorCore.readText()
+        templates.zip(outputs).forEach { (templateEntry, outputProvider) ->
+            val (template, outputName) = templateEntry
+            val templateText = template.readText()
+            check(templateText.contains(wegertColorMarker)) {
+                "$outputName template is missing the Wegert coloring-core marker"
+            }
+            check(templateText.indexOf(wegertColorMarker) == templateText.lastIndexOf(wegertColorMarker)) {
+                "$outputName template must contain exactly one Wegert coloring-core marker"
+            }
 
-        val outputFile = output.get().asFile
-        outputFile.parentFile.mkdirs()
-        outputFile.writeText(templateText.replace(wegertColorMarker, colorCore.readText()))
+            val outputFile = outputProvider.get().asFile
+            outputFile.parentFile.mkdirs()
+            outputFile.writeText(templateText.replace(wegertColorMarker, colorText))
+        }
     }
 }
 
@@ -145,5 +154,5 @@ android {
 }
 
 tasks.named("preBuild").configure {
-    dependsOn(assembleContinuationShader)
+    dependsOn(assembleContinuationShaders)
 }
