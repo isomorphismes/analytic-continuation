@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+env:
+  SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
@@ -16,6 +19,15 @@ jobs:
           ref: main
           path: .wegert-upstream
           persist-credentials: false
+      - name: Check out canonical complex/projective corpus
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/Idric
+          ref: math/complex-projective-semantics
+          path: .idric-complex
+          persist-credentials: false
+      - name: Record complex/projective semantic target
+        run: echo "IDRIC_COMPLEX_SEMANTICS_SHA=$(git -C .idric-complex rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Reject cross-repository coloring drift
         run: >-
           cmp
@@ -38,3 +50,10 @@ jobs:
         run: |
           test ! -e android/app/src/main/cpp/analytic_continuation.c
           ! grep -RniE 'lasso_map|inverse_lasso|dragging_lasso|lasso_coefficients|continuation_path' android/app/src/main/cpp android/app/src/main/assets/continuation.frag.in
+      - name: Retain complex/projective consumer receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: complex-projective-analytic-consumer
+          path: build/complex-projective-consumer
+          if-no-files-found: warn
