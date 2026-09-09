@@ -29,37 +29,62 @@ vec2 complex_divide(vec2 numerator, vec2 denominator) {
     );
 }
 
-float hash1(float value) {
+// Keep the Cauchy-field residues from the original field experiment stable.
+float field_hash1(float value) {
     return fract(sin(value * 127.1) * 43758.5453123);
+}
+
+// Keep the wandering branch's orbit seeds stable independently of the residues.
+float orbit_hash1(float value) {
+    return fract(sin(value * 127.1 + 31.7) * 43758.5453123);
+}
+
+vec2 source_initial_direction(int index) {
+    float source_index = float(index);
+    float angle = 6.28318530718 * orbit_hash1(source_index + 0.11);
+    return vec2(cos(angle), sin(angle));
+}
+
+float source_radius_scale(int index) {
+    float source_index = float(index);
+    return mix(2.75, 4.00, orbit_hash1(source_index + 1.73));
+}
+
+float source_orbit_speed(int index) {
+    float source_index = float(index);
+    return mix(0.11, 0.19, orbit_hash1(source_index + 4.37));
+}
+
+float source_handedness(int index) {
+    float source_index = float(index);
+    return orbit_hash1(source_index + 7.91) < 0.5 ? -1.0 : 1.0;
 }
 
 vec2 source_position(int index, float time, float view_radius) {
     float source_index = float(index);
-    float theta0 = 6.28318530718 * hash1(source_index + 0.13);
-    float omega = mix(0.10, 0.55, hash1(source_index + 1.91));
-    float wobble = mix(0.05, 0.25, hash1(source_index + 7.12));
-    float theta = theta0 + omega * time + 0.20 * sin(
-        wobble * time + 6.28318530718 * hash1(source_index + 3.77)
+    vec2 initial_direction = source_initial_direction(index);
+    float initial_angle = atan(initial_direction.y, initial_direction.x);
+    float angle = initial_angle
+        + source_handedness(index) * source_orbit_speed(index) * time;
+
+    float bend_phase = 6.28318530718 * orbit_hash1(source_index + 11.23);
+    float radial_bend = 0.22 * sin(2.0 * angle + bend_phase);
+    float radius = source_radius_scale(index) + radial_bend;
+
+    float ellipticity = mix(-0.08, 0.08, orbit_hash1(source_index + 14.67));
+    vec2 orbit = vec2(
+        (1.0 + ellipticity) * cos(angle),
+        (1.0 - ellipticity) * sin(angle)
     );
 
-    float base = 1.8 * view_radius;
-    float radial = 0.35 * view_radius * sin(
-        mix(0.07, 0.31, hash1(source_index + 5.44)) * time +
-        6.28318530718 * hash1(source_index + 9.61)
-    );
-    float radius = base + radial;
-
-    return radius * vec2(cos(theta), sin(theta));
+    return view_radius * radius * orbit;
 }
 
 vec2 source_weight(int index, float time) {
     float source_index = float(index);
-    // The first 0.015..0.08 pass was mathematically live but visually too weak
-    // in an actual 2400x1080 APK capture. Keep 24 sources and strengthen their
-    // residues rather than adding more per-fragment kernels.
-    float amplitude = mix(0.08, 0.35, hash1(source_index + 11.3));
-    float omega = mix(0.08, 0.60, hash1(source_index + 17.8));
-    float phi0 = 6.28318530718 * hash1(source_index + 21.4);
+    float amplitude = mix(0.08, 0.35, field_hash1(source_index + 11.3));
+    float omega = mix(0.08, 0.60, field_hash1(source_index + 17.8));
+    float phi0 = 6.28318530718 * field_hash1(source_index + 21.4);
     float phi = phi0 + omega * time;
     return amplitude * vec2(cos(phi), sin(phi));
 }
@@ -67,6 +92,10 @@ vec2 source_weight(int index, float time) {
 vec2 holomorphic_field(vec2 z, float time, float view_radius) {
     vec2 q = vec2(0.0);
     for (int index = 0; index < SOURCE_COUNT; ++index) {
+        // Wandering orbits specify xi_k(t): how the external sources move.
+        // The Cauchy field is the separate mathematical layer
+        //     q_t(z) = sum_k a_k(t) / (xi_k(t) - z).
+        // Keeping xi_k(t) outside the visible disk makes q_t holomorphic there.
         vec2 source = source_position(index, time, view_radius);
         vec2 weight = source_weight(index, time);
         q += complex_divide(weight, source - z);
@@ -120,9 +149,8 @@ void main() {
         log_modulus -= 0.5 * log(radius_squared);
     }
 
-    // q_t is holomorphic throughout the visible region because every Cauchy
-    // source stays outside its circumscribed view disk. exp(q_t) is therefore
-    // nonzero on the visible region and preserves the explicit divisor there.
+    // exp(q_t) is nonzero on the visible region, so the wandering Cauchy field
+    // changes the background geometry without changing the user's zeros/poles.
     vec2 q = holomorphic_field(z, u_time, view_radius);
     log_modulus += q.x;
     phase += q.y;
