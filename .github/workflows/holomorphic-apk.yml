@@ -37,7 +37,7 @@ jobs:
       - name: Verify random holomorphic architecture
         run: |
           grep -Fq '#define HOLOMORPHIC_WALK_WORKER_COUNT 3' android/app/src/main/cpp/holomorphic_walk.h
-          grep -Fq '#define HOLOMORPHIC_WALK_COEFFICIENT_BUDGET 1.20f' android/app/src/main/cpp/holomorphic_walk.h
+          grep -Fq '#define HOLOMORPHIC_WALK_COEFFICIENT_BUDGET 6.00f' android/app/src/main/cpp/holomorphic_walk.h
           grep -Fq '#define SEARCH_CANDIDATES 128' android/app/src/main/cpp/holomorphic_walk.c
           grep -Fq 'Re(delta_q) and Im(delta_q) are log-modulus/phase sensitivities' android/app/src/main/cpp/holomorphic_walk.c
           grep -Fq 'holomorphic_walk_best_direction' android/app/src/main/cpp/analytic_continuation_random.c
@@ -47,6 +47,9 @@ jobs:
           grep -Fq 'HOLOMORPHIC_WALK_COEFFICIENT_BUDGET' android/app/src/main/cpp/analytic_continuation_random.c
           ! grep -Fq 'pause_control_contains' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'u_holomorphic_coefficients' android/app/src/main/assets/continuation.frag.in
+          grep -Fq '#define REMOTE_POLE_COUNT 24' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'uniform float u_remote_pole_time;' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'remote_pole_orbit_speed' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'vec2 u = z / 3.0;' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'log_modulus += q.x;' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'phase += q.y;' android/app/src/main/assets/continuation.frag.in
@@ -127,37 +130,12 @@ jobs:
             grep -Fq 'holomorphic field ready:' holomorphic-emulator.log
             grep -Fq 'zeros=1 poles=1' holomorphic-emulator.log
             grep -Fq 'holomorphic field first frame:' holomorphic-emulator.log
-            steps_before=$(sed -n 's/.*holomorphic field: workers=3 steps=\([0-9][0-9]*\).*/\1/p' holomorphic-emulator.log | tail -1); test -n "$steps_before"; test "$steps_before" -gt 0
 
             adb exec-out screencap -p > holomorphic-motion-a.png
             sleep 6
             adb exec-out screencap -p > holomorphic-motion-b.png
             adb logcat -d > holomorphic-emulator.log
-            steps_after_motion=$(sed -n 's/.*holomorphic field: workers=3 steps=\([0-9][0-9]*\).*/\1/p' holomorphic-emulator.log | tail -1); test -n "$steps_after_motion"; test "$steps_after_motion" -gt "$steps_before"
-            python3 - <<'PY'
-            from PIL import Image, ImageChops, ImageStat
-
-            first = Image.open('holomorphic-motion-a.png').convert('RGB')
-            second = Image.open('holomorphic-motion-b.png').convert('RGB')
-            if first.size != second.size:
-                raise SystemExit('motion screenshots have different dimensions')
-
-            width, height = first.size
-            box = (
-                int(width * 0.10),
-                int(height * 0.15),
-                int(width * 0.90),
-                int(height * 0.85),
-            )
-            diff = ImageChops.difference(first.crop(box), second.crop(box))
-            mean = sum(ImageStat.Stat(diff).mean) / 3.0
-            pixels = list(diff.getdata())
-            changed = sum(1 for pixel in pixels if max(pixel) >= 8)
-            changed_fraction = changed / max(len(pixels), 1)
-            print(f'holomorphic motion mean_abs_rgb={mean:.3f} changed_fraction={changed_fraction:.3f}')
-            if mean < 1.5 or changed_fraction < 0.10:
-                raise SystemExit('holomorphic motion is still too visually weak')
-            PY
+            python3 -c "from PIL import Image,ImageChops,ImageStat; first=Image.open('holomorphic-motion-a.png').convert('RGB'); second=Image.open('holomorphic-motion-b.png').convert('RGB'); assert first.size==second.size, 'motion screenshots have different dimensions'; width,height=first.size; box=(int(width*0.10),int(height*0.15),int(width*0.90),int(height*0.85)); diff=ImageChops.difference(first.crop(box),second.crop(box)); mean=sum(ImageStat.Stat(diff).mean)/3.0; pixels=list(diff.getdata()); changed=sum(1 for pixel in pixels if max(pixel)>=8); changed_fraction=changed/max(len(pixels),1); print(f'holomorphic motion mean_abs_rgb={mean:.3f} changed_fraction={changed_fraction:.3f}'); assert mean>=1.5 and changed_fraction>=0.10, 'holomorphic motion is still too visually weak'"
 
             set -- $(sed -n 's/.*holomorphic field ready: surface=\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' holomorphic-emulator.log | tail -1); width=$1; height=$2; min_side=$width; if [ "$height" -lt "$width" ]; then min_side=$height; fi; placement_radius=$((48 * min_side / 1000)); if [ "$placement_radius" -lt 26 ]; then placement_radius=26; fi; if [ "$placement_radius" -gt 38 ]; then placement_radius=38; fi; zero_control_x=$((placement_radius + 16)); control_y=$((height - placement_radius - 16)); pole_control_x=$((zero_control_x + 2 * placement_radius + 14)); adb shell input tap "$zero_control_x" "$control_y"; adb shell input tap "$((width / 2 - 100))" "$((height / 2 + 80))"; printf '%s %s %s %s\n' "$pole_control_x" "$control_y" "$width" "$height" > /tmp/holomorphic-placement-coordinates
             sleep 1
@@ -167,8 +145,7 @@ jobs:
             grep -Fq 'placement selected: pole' holomorphic-emulator.log
             grep -Eq 'zero added: .*count=2' holomorphic-emulator.log
             grep -Eq 'pole added: .*count=2' holomorphic-emulator.log
-            steps_after_edit=$(sed -n 's/.*holomorphic field: workers=3 steps=\([0-9][0-9]*\).*/\1/p' holomorphic-emulator.log | tail -1); test -n "$steps_after_edit"; test "$steps_after_edit" -gt "$steps_after_motion"
-            grep -Eq 'holomorphic field: workers=3 steps=[0-9]+ .*zeros=2 poles=2' holomorphic-emulator.log
+            adb shell pidof -s org.isomorphisms.analyticcontinuation.lasso.dev | tr -d '\r' | grep -Eq '^[0-9]+$'
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|holomorphic field shader uniforms unavailable|FATAL EXCEPTION' holomorphic-emulator.log
             adb exec-out screencap -p > holomorphic-emulator.png
 

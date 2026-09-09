@@ -61,6 +61,7 @@ struct engine {
     GLint zero_positions_location;
     GLint pole_positions_location;
     GLint holomorphic_coefficients_location;
+    GLint remote_pole_time_location;
     GLint zoom_location;
     GLint placement_kind_location;
 
@@ -72,6 +73,7 @@ struct engine {
 
     float holomorphic_coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
     float deformation_velocity[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
+    float remote_pole_time;
     double deformation_last_time;
     double deformation_last_publish;
     double deformation_last_log;
@@ -115,6 +117,7 @@ static void initialize_state(struct engine *engine) {
     engine->placement_kind = PLACEMENT_ZERO;
     memset(engine->holomorphic_coefficients, 0, sizeof(engine->holomorphic_coefficients));
     memset(engine->deformation_velocity, 0, sizeof(engine->deformation_velocity));
+    engine->remote_pole_time = 0.0f;
     engine->deformation_last_time = monotonic_seconds();
     engine->deformation_last_publish = 0.0;
     engine->deformation_last_log = 0.0;
@@ -255,6 +258,9 @@ static bool create_renderer(struct engine *engine) {
     engine->holomorphic_coefficients_location = glGetUniformLocation(
         engine->program, "u_holomorphic_coefficients[0]"
     );
+    engine->remote_pole_time_location = glGetUniformLocation(
+        engine->program, "u_remote_pole_time"
+    );
     engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
     engine->placement_kind_location = glGetUniformLocation(engine->program, "u_placement_kind");
 
@@ -263,6 +269,7 @@ static bool create_renderer(struct engine *engine) {
         engine->pole_count_location < 0 || engine->zero_positions_location < 0 ||
         engine->pole_positions_location < 0 ||
         engine->holomorphic_coefficients_location < 0 ||
+        engine->remote_pole_time_location < 0 ||
         engine->zoom_location < 0 || engine->placement_kind_location < 0
     ) {
         LOGE("holomorphic field shader uniforms unavailable");
@@ -443,6 +450,7 @@ static void draw_frame(struct engine *engine) {
         HOLOMORPHIC_WALK_COEFFICIENT_COUNT,
         &engine->holomorphic_coefficients[0][0]
     );
+    glUniform1f(engine->remote_pole_time_location, engine->remote_pole_time);
     glUniform1f(engine->zoom_location, engine->zoom);
     glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
 
@@ -646,6 +654,9 @@ static void advance_holomorphic_function(struct engine *engine) {
     if (!engine->focused || engine->dragging_factor || engine->pinching) {
         return;
     }
+
+    engine->remote_pole_time += dt;
+    engine->dirty = true;
 
     float score = 0.0f;
     float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
