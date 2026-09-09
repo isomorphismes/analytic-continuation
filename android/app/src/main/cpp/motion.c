@@ -264,10 +264,15 @@ bool motion_program_advance(
     return changed;
 }
 
+int motion_program_completed_exchange_count(const struct motion_program *program) {
+    int completed = 0;
+    for (int index = 0; index < program->exchange_count; ++index) {
+        if (program->exchanges[index].completed) ++completed;
+    }
+    return completed;
+}
+
 bool motion_program_complete(const struct motion_program *program) {
     if (program->wander_speed > 0.0f) return false;
-    for (int index = 0; index < program->exchange_count; ++index) {
-        if (!program->exchanges[index].completed) return false;
-    }
-    return true;
+    return motion_program_completed_exchange_count(program) == program->exchange_count;
 }
