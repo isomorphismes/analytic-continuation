@@ -14,13 +14,12 @@
 #include <string.h>
 #include <time.h>
 
-#include "holomorphic_walk.h"
+#include "field_evolution.h"
+#include "scenario.h"
 
 #define LOG_TAG "AnalyticContinuation"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-
-#define MAX_FACTORS 32
 
 static const char *VERTEX_SHADER =
     "#version 300 es\n"
@@ -31,17 +30,6 @@ static const char *VERTEX_SHADER =
     "    v_ndc = a_position;\n"
     "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
     "}\n";
-
-enum placement_kind {
-    PLACEMENT_ZERO = 0,
-    PLACEMENT_POLE = 1
-};
-
-enum factor_kind {
-    FACTOR_NONE = -1,
-    FACTOR_ZERO = 0,
-    FACTOR_POLE = 1
-};
 
 struct engine {
     struct android_app *app;
@@ -63,36 +51,29 @@ struct engine {
     GLint holomorphic_coefficients_location;
     GLint zoom_location;
     GLint placement_kind_location;
+    GLint show_controls_location;
+    GLint marker_radius_location;
+    GLint marker_stroke_location;
 
-    float zero_positions[MAX_FACTORS][2];
-    int zero_count;
-    float pole_positions[MAX_FACTORS][2];
-    int pole_count;
-    enum placement_kind placement_kind;
+    struct scenario scenario;
+    struct field_evolution field;
+    enum scene_factor_kind placement_kind;
+    double motion_last_time;
+    double status_last_log;
 
-    float holomorphic_coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
-    float deformation_velocity[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
-    double deformation_last_time;
-    double deformation_last_publish;
-    double deformation_last_log;
-    uint64_t deformation_accepted_steps;
-    bool deformation_workers_started;
-    bool deformation_direction_ready;
-    bool focused;
-
-    float zoom;
     float pinch_start_distance;
     float pinch_start_zoom;
     bool pinching;
     bool suppress_tap;
 
-    enum factor_kind candidate_kind;
+    enum scene_factor_kind candidate_kind;
     int candidate_index;
     bool dragging_factor;
     bool moved;
     float down_x;
     float down_y;
 
+    bool focused;
     bool dirty;
     bool logged_first_frame;
 };
@@ -101,39 +82,6 @@ static double monotonic_seconds(void) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     return (double)now.tv_sec + 1.0e-9 * (double)now.tv_nsec;
-}
-
-static void initialize_state(struct engine *engine) {
-    engine->zero_count = 1;
-    engine->zero_positions[0][0] = -0.34f;
-    engine->zero_positions[0][1] = 0.0f;
-
-    engine->pole_count = 1;
-    engine->pole_positions[0][0] = 0.34f;
-    engine->pole_positions[0][1] = 0.0f;
-
-    engine->placement_kind = PLACEMENT_ZERO;
-    memset(engine->holomorphic_coefficients, 0, sizeof(engine->holomorphic_coefficients));
-    memset(engine->deformation_velocity, 0, sizeof(engine->deformation_velocity));
-    engine->deformation_last_time = monotonic_seconds();
-    engine->deformation_last_publish = 0.0;
-    engine->deformation_last_log = 0.0;
-    engine->deformation_accepted_steps = 0;
-    engine->deformation_workers_started = false;
-    engine->deformation_direction_ready = false;
-    engine->focused = false;
-
-    engine->zoom = 1.0f;
-    engine->pinch_start_distance = 0.0f;
-    engine->pinch_start_zoom = 1.0f;
-    engine->pinching = false;
-    engine->suppress_tap = false;
-
-    engine->candidate_kind = FACTOR_NONE;
-    engine->candidate_index = -1;
-    engine->dragging_factor = false;
-    engine->moved = false;
-    engine->dirty = true;
 }
 
 static char *load_asset_text(AAssetManager *manager, const char *name) {
@@ -164,6 +112,52 @@ static char *load_asset_text(AAssetManager *manager, const char *name) {
     text[length] = '\0';
     AAsset_close(asset);
     return text;
+}
+
+static void initialize_state(struct engine *engine) {
+    double now = monotonic_seconds();
+    scenario_initialize_interactive(&engine->scenario);
+
+    char *scenario_text = load_asset_text(engine->app->activity->assetManager, "scenario.conf");
+    if (scenario_text != NULL) {
+        char error[192];
+        if (!scenario_parse_text(&engine->scenario, scenario_text, error, sizeof(error))) {
+            LOGE("scenario.conf rejected: %s; using interactive defaults", error);
+            scenario_initialize_interactive(&engine->scenario);
+        }
+        free(scenario_text);
+    } else {
+        LOGE("scenario.conf unavailable; using interactive defaults");
+    }
+
+    field_evolution_initialize(&engine->field, engine->scenario.field_speed, now);
+    engine->placement_kind = SCENE_FACTOR_ZERO;
+    engine->motion_last_time = now;
+    engine->status_last_log = 0.0;
+
+    engine->pinch_start_distance = 0.0f;
+    engine->pinch_start_zoom = 1.0f;
+    engine->pinching = false;
+    engine->suppress_tap = false;
+
+    engine->candidate_kind = SCENE_FACTOR_NONE;
+    engine->candidate_index = -1;
+    engine->dragging_factor = false;
+    engine->moved = false;
+    engine->focused = false;
+    engine->dirty = true;
+
+    LOGI(
+        "scenario ready: name=%s zeros=%d poles=%d motion=%d controls=%d marker=%.3g/%.3g field_speed=%.3g",
+        engine->scenario.name,
+        engine->scenario.scene.zero_count,
+        engine->scenario.scene.pole_count,
+        engine->scenario.motion.enabled ? 1 : 0,
+        engine->scenario.presentation.show_controls ? 1 : 0,
+        engine->scenario.presentation.marker_radius_px,
+        engine->scenario.presentation.marker_stroke_px,
+        engine->scenario.field_speed
+    );
 }
 
 static GLuint compile_shader(GLenum type, const char *source) {
@@ -257,13 +251,18 @@ static bool create_renderer(struct engine *engine) {
     );
     engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
     engine->placement_kind_location = glGetUniformLocation(engine->program, "u_placement_kind");
+    engine->show_controls_location = glGetUniformLocation(engine->program, "u_show_controls");
+    engine->marker_radius_location = glGetUniformLocation(engine->program, "u_marker_radius");
+    engine->marker_stroke_location = glGetUniformLocation(engine->program, "u_marker_stroke");
 
     if (
         engine->resolution_location < 0 || engine->zero_count_location < 0 ||
         engine->pole_count_location < 0 || engine->zero_positions_location < 0 ||
         engine->pole_positions_location < 0 ||
         engine->holomorphic_coefficients_location < 0 ||
-        engine->zoom_location < 0 || engine->placement_kind_location < 0
+        engine->zoom_location < 0 || engine->placement_kind_location < 0 ||
+        engine->show_controls_location < 0 || engine->marker_radius_location < 0 ||
+        engine->marker_stroke_location < 0
     ) {
         LOGE("holomorphic field shader uniforms unavailable");
         return false;
@@ -369,8 +368,12 @@ static bool initialize_display(struct engine *engine) {
     glViewport(0, 0, engine->width, engine->height);
     engine->dirty = true;
     LOGI(
-        "holomorphic field ready: surface=%dx%d zeros=%d poles=%d",
-        engine->width, engine->height, engine->zero_count, engine->pole_count
+        "holomorphic field ready: surface=%dx%d zeros=%d poles=%d scenario=%s",
+        engine->width,
+        engine->height,
+        engine->scenario.scene.zero_count,
+        engine->scenario.scene.pole_count,
+        engine->scenario.name
     );
     return true;
 }
@@ -417,7 +420,7 @@ static void update_surface_size(struct engine *engine) {
 }
 
 static float view_pixel_radius(const struct engine *engine) {
-    return 0.42f * fminf((float)engine->width, (float)engine->height) * engine->zoom;
+    return 0.42f * fminf((float)engine->width, (float)engine->height) * engine->scenario.scene.zoom;
 }
 
 static void draw_frame(struct engine *engine) {
@@ -428,23 +431,33 @@ static void draw_frame(struct engine *engine) {
         return;
     }
 
+    const struct scene *scene = &engine->scenario.scene;
+    const struct presentation_config *presentation = &engine->scenario.presentation;
+
     glUseProgram(engine->program);
     glUniform2f(engine->resolution_location, (float)engine->width, (float)engine->height);
-    glUniform1i(engine->zero_count_location, engine->zero_count);
-    glUniform1i(engine->pole_count_location, engine->pole_count);
+    glUniform1i(engine->zero_count_location, scene->zero_count);
+    glUniform1i(engine->pole_count_location, scene->pole_count);
     glUniform2fv(
-        engine->zero_positions_location, MAX_FACTORS, &engine->zero_positions[0][0]
+        engine->zero_positions_location,
+        SCENE_MAX_FACTORS,
+        &scene->zero_positions[0][0]
     );
     glUniform2fv(
-        engine->pole_positions_location, MAX_FACTORS, &engine->pole_positions[0][0]
+        engine->pole_positions_location,
+        SCENE_MAX_FACTORS,
+        &scene->pole_positions[0][0]
     );
     glUniform2fv(
         engine->holomorphic_coefficients_location,
         HOLOMORPHIC_WALK_COEFFICIENT_COUNT,
-        &engine->holomorphic_coefficients[0][0]
+        &engine->field.coefficients[0][0]
     );
-    glUniform1f(engine->zoom_location, engine->zoom);
+    glUniform1f(engine->zoom_location, scene->zoom);
     glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
+    glUniform1i(engine->show_controls_location, presentation->show_controls ? 1 : 0);
+    glUniform1f(engine->marker_radius_location, presentation->marker_radius_px);
+    glUniform1f(engine->marker_stroke_location, presentation->marker_stroke_px);
 
     glBindVertexArray(engine->vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -456,8 +469,12 @@ static void draw_frame(struct engine *engine) {
             GL_RGBA, GL_UNSIGNED_BYTE, center_pixel
         );
         LOGI(
-            "holomorphic field first frame: center rgba=%u,%u,%u,%u",
-            center_pixel[0], center_pixel[1], center_pixel[2], center_pixel[3]
+            "holomorphic field first frame: center rgba=%u,%u,%u,%u scenario=%s",
+            center_pixel[0],
+            center_pixel[1],
+            center_pixel[2],
+            center_pixel[3],
+            engine->scenario.name
         );
         engine->logged_first_frame = true;
     }
@@ -490,19 +507,21 @@ static bool placement_control_hit(
     const struct engine *engine,
     float x,
     float y,
-    enum placement_kind *kind
+    enum scene_factor_kind *kind
 ) {
+    if (!engine->scenario.presentation.show_controls) return false;
+
     float radius = placement_radius(engine);
     float zero_x = radius + 16.0f;
     float pole_x = zero_x + 2.0f * radius + 14.0f;
     float center_y = (float)engine->height - radius - 16.0f;
 
     if (hypotf(x - zero_x, y - center_y) <= radius) {
-        *kind = PLACEMENT_ZERO;
+        *kind = SCENE_FACTOR_ZERO;
         return true;
     }
     if (hypotf(x - pole_x, y - center_y) <= radius) {
-        *kind = PLACEMENT_POLE;
+        *kind = SCENE_FACTOR_POLE;
         return true;
     }
     return false;
@@ -512,39 +531,40 @@ static void nearest_factor(
     const struct engine *engine,
     float x,
     float y,
-    enum factor_kind *kind,
+    enum scene_factor_kind *kind,
     int *factor_index
 ) {
-    *kind = FACTOR_NONE;
+    *kind = SCENE_FACTOR_NONE;
     *factor_index = -1;
     if (engine->width <= 0 || engine->height <= 0) {
         return;
     }
 
+    const struct scene *scene = &engine->scenario.scene;
     float point[2];
     screen_to_plane(engine, x, y, point);
     float scale = view_pixel_radius(engine);
     float best_distance = 38.0f;
 
-    for (int index = 0; index < engine->zero_count; ++index) {
+    for (int index = 0; index < scene->zero_count; ++index) {
         float distance = hypotf(
-            (point[0] - engine->zero_positions[index][0]) * scale,
-            (point[1] - engine->zero_positions[index][1]) * scale
+            (point[0] - scene->zero_positions[index][0]) * scale,
+            (point[1] - scene->zero_positions[index][1]) * scale
         );
         if (distance < best_distance) {
             best_distance = distance;
-            *kind = FACTOR_ZERO;
+            *kind = SCENE_FACTOR_ZERO;
             *factor_index = index;
         }
     }
-    for (int index = 0; index < engine->pole_count; ++index) {
+    for (int index = 0; index < scene->pole_count; ++index) {
         float distance = hypotf(
-            (point[0] - engine->pole_positions[index][0]) * scale,
-            (point[1] - engine->pole_positions[index][1]) * scale
+            (point[0] - scene->pole_positions[index][0]) * scale,
+            (point[1] - scene->pole_positions[index][1]) * scale
         );
         if (distance < best_distance) {
             best_distance = distance;
-            *kind = FACTOR_POLE;
+            *kind = SCENE_FACTOR_POLE;
             *factor_index = index;
         }
     }
@@ -552,162 +572,86 @@ static void nearest_factor(
 
 static void move_factor(
     struct engine *engine,
-    enum factor_kind kind,
+    enum scene_factor_kind kind,
     int index,
     float x,
     float y
 ) {
-    float (*positions)[2] = kind == FACTOR_ZERO
-        ? engine->zero_positions
-        : engine->pole_positions;
-    int count = kind == FACTOR_ZERO ? engine->zero_count : engine->pole_count;
-    if (kind == FACTOR_NONE || index < 0 || index >= count) {
-        return;
-    }
-
     float point[2];
     screen_to_plane(engine, x, y, point);
-    positions[index][0] = point[0];
-    positions[index][1] = point[1];
-    engine->dirty = true;
+    if (scene_move_factor(&engine->scenario.scene, kind, index, point[0], point[1])) {
+        engine->dirty = true;
+    }
+}
+
+static const char *factor_name(enum scene_factor_kind kind) {
+    return kind == SCENE_FACTOR_ZERO ? "zero" : "pole";
 }
 
 static void add_factor(
     struct engine *engine,
-    enum placement_kind placement,
+    enum scene_factor_kind kind,
     float x,
     float y
 ) {
-    int *count = placement == PLACEMENT_ZERO
-        ? &engine->zero_count
-        : &engine->pole_count;
-    float (*positions)[2] = placement == PLACEMENT_ZERO
-        ? engine->zero_positions
-        : engine->pole_positions;
-    const char *name = placement == PLACEMENT_ZERO ? "zero" : "pole";
-
-    if (*count >= MAX_FACTORS) {
-        LOGI("%s ignored: limit=%d", name, MAX_FACTORS);
-        return;
-    }
-
     float point[2];
     screen_to_plane(engine, x, y, point);
-    int index = *count;
-    positions[index][0] = point[0];
-    positions[index][1] = point[1];
-    *count += 1;
+    int index = -1;
+    if (!scene_add_factor(&engine->scenario.scene, kind, point[0], point[1], &index)) {
+        LOGI("%s ignored: limit=%d", factor_name(kind), SCENE_MAX_FACTORS);
+        return;
+    }
+
     engine->dirty = true;
-
-    LOGI("%s added: z=%.6g%+.6gi count=%d", name, point[0], point[1], *count);
-}
-
-static void publish_deformation_snapshot(struct engine *engine, double now) {
-    if (!engine->deformation_workers_started) {
-        return;
-    }
-    if (
-        engine->deformation_last_publish == 0.0 ||
-        now - engine->deformation_last_publish >= 0.200
-    ) {
-        holomorphic_walk_publish(engine->holomorphic_coefficients);
-        engine->deformation_last_publish = now;
-    }
-}
-
-static void log_holomorphic_state(struct engine *engine, double now, float score) {
-    if (now - engine->deformation_last_log < 2.0) {
-        return;
-    }
     LOGI(
-        "holomorphic field: workers=%d steps=%llu budget=%.4f score=%.6g zeros=%d poles=%d",
-        HOLOMORPHIC_WALK_WORKER_COUNT,
-        (unsigned long long)engine->deformation_accepted_steps,
-        holomorphic_walk_coefficient_budget(engine->holomorphic_coefficients),
-        score,
-        engine->zero_count,
-        engine->pole_count
+        "%s added: z=%.6g%+.6gi index=%d count=%d",
+        factor_name(kind),
+        point[0],
+        point[1],
+        index,
+        scene_factor_count(&engine->scenario.scene, kind)
     );
-    engine->deformation_last_log = now;
 }
 
-static void advance_holomorphic_function(struct engine *engine) {
+static void log_runtime_state(struct engine *engine, double now) {
+    if (now - engine->status_last_log < 2.0) return;
+
+    LOGI(
+        "holomorphic field: workers=%d steps=%llu budget=%.4f score=%.6g zeros=%d poles=%d scenario=%s motion_t=%.3f",
+        HOLOMORPHIC_WALK_WORKER_COUNT,
+        (unsigned long long)engine->field.accepted_steps,
+        holomorphic_walk_coefficient_budget(engine->field.coefficients),
+        engine->field.last_score,
+        engine->scenario.scene.zero_count,
+        engine->scenario.scene.pole_count,
+        engine->scenario.name,
+        engine->scenario.motion.elapsed_seconds
+    );
+    engine->status_last_log = now;
+}
+
+static void advance_animation(struct engine *engine) {
     double now = monotonic_seconds();
-    float dt = (float)(now - engine->deformation_last_time);
-    engine->deformation_last_time = now;
-    if (dt <= 0.0f) {
-        return;
-    }
-    if (dt > 0.05f) {
-        dt = 0.05f;
-    }
+    float motion_dt = (float)(now - engine->motion_last_time);
+    engine->motion_last_time = now;
 
-    publish_deformation_snapshot(engine, now);
-    if (!engine->focused || engine->dragging_factor || engine->pinching) {
-        return;
-    }
-
-    float score = 0.0f;
-    float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
-    if (
-        engine->deformation_workers_started &&
-        holomorphic_walk_best_direction(direction, &score)
-    ) {
-        float blend = 1.0f - expf(-4.0f * dt);
-        const float speed = 0.30f;
-        for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-            engine->deformation_velocity[index][0] =
-                (1.0f - blend) * engine->deformation_velocity[index][0] +
-                blend * speed * direction[index][0];
-            engine->deformation_velocity[index][1] =
-                (1.0f - blend) * engine->deformation_velocity[index][1] +
-                blend * speed * direction[index][1];
-        }
-        engine->deformation_direction_ready = true;
-    }
-
-    if (!engine->deformation_direction_ready) {
-        log_holomorphic_state(engine, now, score);
-        return;
-    }
-
-    float candidate[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
-    for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-        candidate[index][0] =
-            engine->holomorphic_coefficients[index][0] +
-            dt * engine->deformation_velocity[index][0];
-        candidate[index][1] =
-            engine->holomorphic_coefficients[index][1] +
-            dt * engine->deformation_velocity[index][1];
-    }
-
-    if (
-        holomorphic_walk_coefficient_budget(candidate) <=
-        HOLOMORPHIC_WALK_COEFFICIENT_BUDGET
-    ) {
-        memcpy(
-            engine->holomorphic_coefficients,
-            candidate,
-            sizeof(engine->holomorphic_coefficients)
-        );
-        engine->deformation_accepted_steps += 1;
+    bool blocked = engine->dragging_factor || engine->pinching;
+    if (field_evolution_advance(&engine->field, now, !blocked)) {
         engine->dirty = true;
-    } else {
-        for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-            engine->deformation_velocity[index][0] *= -0.30f;
-            engine->deformation_velocity[index][1] *= -0.30f;
-        }
-        if (engine->deformation_workers_started) {
-            holomorphic_walk_publish(engine->holomorphic_coefficients);
-            engine->deformation_last_publish = now;
-        }
+    }
+    if (!blocked && motion_program_advance(
+            &engine->scenario.motion,
+            &engine->scenario.scene,
+            motion_dt
+        )) {
+        engine->dirty = true;
     }
 
-    log_holomorphic_state(engine, now, score);
+    log_runtime_state(engine, now);
 }
 
 static void clear_gesture(struct engine *engine) {
-    engine->candidate_kind = FACTOR_NONE;
+    engine->candidate_kind = SCENE_FACTOR_NONE;
     engine->candidate_index = -1;
     engine->dragging_factor = false;
     engine->moved = false;
@@ -726,7 +670,7 @@ static void begin_pinch(struct engine *engine, AInputEvent *event) {
     engine->pinching = true;
     engine->suppress_tap = true;
     engine->pinch_start_distance = distance;
-    engine->pinch_start_zoom = engine->zoom;
+    engine->pinch_start_zoom = engine->scenario.scene.zoom;
     clear_gesture(engine);
 }
 
@@ -738,8 +682,8 @@ static void update_pinch(struct engine *engine, AInputEvent *event) {
     float zoom = engine->pinch_start_zoom * distance / engine->pinch_start_distance;
     if (zoom < 0.5f) zoom = 0.5f;
     if (zoom > 4.0f) zoom = 4.0f;
-    if (fabsf(zoom - engine->zoom) > 1.0e-4f) {
-        engine->zoom = zoom;
+    if (fabsf(zoom - engine->scenario.scene.zoom) > 1.0e-4f) {
+        engine->scenario.scene.zoom = zoom;
         engine->dirty = true;
     }
 }
@@ -748,6 +692,9 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
     struct engine *engine = app->userData;
     if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION) {
         return 0;
+    }
+    if (!engine->scenario.presentation.interaction_enabled) {
+        return 1;
     }
 
     int32_t masked_action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
@@ -759,23 +706,24 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
             float y = AMotionEvent_getY(event, 0);
             engine->suppress_tap = false;
 
-            enum placement_kind selected;
+            enum scene_factor_kind selected;
             if (placement_control_hit(engine, x, y, &selected)) {
                 engine->placement_kind = selected;
                 engine->dirty = true;
                 clear_gesture(engine);
                 engine->suppress_tap = true;
-                LOGI(
-                    "placement selected: %s",
-                    selected == PLACEMENT_ZERO ? "zero" : "pole"
-                );
+                LOGI("placement selected: %s", factor_name(selected));
                 return 1;
             }
 
             engine->down_x = x;
             engine->down_y = y;
             nearest_factor(
-                engine, x, y, &engine->candidate_kind, &engine->candidate_index
+                engine,
+                x,
+                y,
+                &engine->candidate_kind,
+                &engine->candidate_index
             );
             engine->dragging_factor = false;
             engine->moved = false;
@@ -803,10 +751,14 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
                 engine->moved = true;
             }
 
-            if (engine->moved && engine->candidate_kind != FACTOR_NONE) {
+            if (engine->moved && engine->candidate_kind != SCENE_FACTOR_NONE) {
                 engine->dragging_factor = true;
                 move_factor(
-                    engine, engine->candidate_kind, engine->candidate_index, x, y
+                    engine,
+                    engine->candidate_kind,
+                    engine->candidate_index,
+                    x,
+                    y
                 );
             }
             return 1;
@@ -825,27 +777,22 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
             if (!engine->moved && !engine->dragging_factor) {
                 add_factor(engine, engine->placement_kind, x, y);
             } else if (
-                engine->dragging_factor && engine->candidate_kind != FACTOR_NONE
+                engine->dragging_factor && engine->candidate_kind != SCENE_FACTOR_NONE
             ) {
-                const char *name = engine->candidate_kind == FACTOR_ZERO
-                    ? "zero"
-                    : "pole";
-                float (*positions)[2] = engine->candidate_kind == FACTOR_ZERO
-                    ? engine->zero_positions
-                    : engine->pole_positions;
+                const float (*positions)[2] = scene_factor_positions_const(
+                    &engine->scenario.scene,
+                    engine->candidate_kind
+                );
                 LOGI(
                     "%s moved: index=%d z=%.6g%+.6gi",
-                    name,
+                    factor_name(engine->candidate_kind),
                     engine->candidate_index,
                     positions[engine->candidate_index][0],
                     positions[engine->candidate_index][1]
                 );
             }
             clear_gesture(engine);
-            if (engine->deformation_workers_started) {
-                holomorphic_walk_publish(engine->holomorphic_coefficients);
-                engine->deformation_last_publish = monotonic_seconds();
-            }
+            field_evolution_publish_now(&engine->field, monotonic_seconds());
             return 1;
         }
 
@@ -882,11 +829,14 @@ static void handle_command(struct android_app *app, int32_t command) {
         case APP_CMD_CONFIG_CHANGED:
             update_surface_size(engine);
             break;
-        case APP_CMD_GAINED_FOCUS:
+        case APP_CMD_GAINED_FOCUS: {
+            double now = monotonic_seconds();
             engine->focused = true;
-            engine->deformation_last_time = monotonic_seconds();
+            field_evolution_reset_clock(&engine->field, now);
+            engine->motion_last_time = now;
             engine->dirty = true;
             break;
+        }
         case APP_CMD_LOST_FOCUS:
             engine->focused = false;
             break;
@@ -901,17 +851,14 @@ void android_main(struct android_app *app) {
         .display = EGL_NO_DISPLAY,
         .surface = EGL_NO_SURFACE,
         .context = EGL_NO_CONTEXT,
-        .candidate_kind = FACTOR_NONE,
+        .candidate_kind = SCENE_FACTOR_NONE,
         .candidate_index = -1,
         .dirty = true,
         .logged_first_frame = false
     };
     initialize_state(&engine);
 
-    engine.deformation_workers_started = holomorphic_walk_start();
-    if (engine.deformation_workers_started) {
-        holomorphic_walk_publish(engine.holomorphic_coefficients);
-        engine.deformation_last_publish = monotonic_seconds();
+    if (field_evolution_start(&engine.field, monotonic_seconds())) {
         LOGI(
             "holomorphic field started with %d workers",
             HOLOMORPHIC_WALK_WORKER_COUNT
@@ -927,7 +874,9 @@ void android_main(struct android_app *app) {
     while (true) {
         int events = 0;
         struct android_poll_source *source = NULL;
-        bool can_animate = engine.display != EGL_NO_DISPLAY && engine.focused;
+        bool can_animate =
+            engine.display != EGL_NO_DISPLAY && engine.focused &&
+            (engine.field.workers_started || engine.scenario.motion.enabled);
         int timeout = can_animate ? 16 : (engine.dirty ? 0 : -1);
         int ident = ALooper_pollOnce(timeout, NULL, &events, (void **)&source);
 
@@ -935,15 +884,12 @@ void android_main(struct android_app *app) {
             source->process(app, source);
         }
         if (app->destroyRequested != 0) {
-            if (engine.deformation_workers_started) {
-                holomorphic_walk_stop();
-                engine.deformation_workers_started = false;
-            }
+            field_evolution_stop(&engine.field);
             terminate_display(&engine);
             return;
         }
         if (engine.display != EGL_NO_DISPLAY && engine.focused) {
-            advance_holomorphic_function(&engine);
+            advance_animation(&engine);
         }
         if (engine.dirty) {
             draw_frame(&engine);
