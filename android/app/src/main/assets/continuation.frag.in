@@ -5,7 +5,7 @@ precision highp int;
 /*__WEGERT_COLOR_CORE__*/
 
 #define MAX_FACTORS 32
-#define HOLOMORPHIC_COEFFICIENT_COUNT 5
+#define SOURCE_COUNT 24
 
 in vec2 v_ndc;
 out vec4 frag_color;
@@ -15,26 +15,58 @@ uniform int u_zero_count;
 uniform int u_pole_count;
 uniform vec2 u_zero_positions[MAX_FACTORS];
 uniform vec2 u_pole_positions[MAX_FACTORS];
-uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];
+uniform float u_time;
 uniform float u_zoom;
 uniform int u_placement_kind;
 
-vec2 complex_multiply(vec2 left, vec2 right) {
+vec2 complex_divide(vec2 numerator, vec2 denominator) {
+    float magnitude_squared = max(dot(denominator, denominator), 1.0e-12);
     return vec2(
-        left.x * right.x - left.y * right.y,
-        left.x * right.y + left.y * right.x
+        (numerator.x * denominator.x + numerator.y * denominator.y) /
+            magnitude_squared,
+        (numerator.y * denominator.x - numerator.x * denominator.y) /
+            magnitude_squared
     );
 }
 
-vec2 holomorphic_q(vec2 z) {
-    // Keep the normalization fixed in the mathematical plane rather than tied
-    // to zoom, but make the live entire factor large enough to read on a phone.
-    vec2 u = z / 3.0;
-    vec2 power = u;
+float hash1(float value) {
+    return fract(sin(value * 127.1) * 43758.5453123);
+}
+
+vec2 source_position(int index, float time, float view_radius) {
+    float source_index = float(index);
+    float theta0 = 6.28318530718 * hash1(source_index + 0.13);
+    float omega = mix(0.10, 0.55, hash1(source_index + 1.91));
+    float wobble = mix(0.05, 0.25, hash1(source_index + 7.12));
+    float theta = theta0 + omega * time + 0.20 * sin(
+        wobble * time + 6.28318530718 * hash1(source_index + 3.77)
+    );
+
+    float base = 1.8 * view_radius;
+    float radial = 0.35 * view_radius * sin(
+        mix(0.07, 0.31, hash1(source_index + 5.44)) * time +
+        6.28318530718 * hash1(source_index + 9.61)
+    );
+    float radius = base + radial;
+
+    return radius * vec2(cos(theta), sin(theta));
+}
+
+vec2 source_weight(int index, float time) {
+    float source_index = float(index);
+    float amplitude = mix(0.015, 0.08, hash1(source_index + 11.3));
+    float omega = mix(0.08, 0.60, hash1(source_index + 17.8));
+    float phi0 = 6.28318530718 * hash1(source_index + 21.4);
+    float phi = phi0 + omega * time;
+    return amplitude * vec2(cos(phi), sin(phi));
+}
+
+vec2 holomorphic_field(vec2 z, float time, float view_radius) {
     vec2 q = vec2(0.0);
-    for (int index = 0; index < HOLOMORPHIC_COEFFICIENT_COUNT; ++index) {
-        q += complex_multiply(u_holomorphic_coefficients[index], power);
-        power = complex_multiply(power, u);
+    for (int index = 0; index < SOURCE_COUNT; ++index) {
+        vec2 source = source_position(index, time, view_radius);
+        vec2 weight = source_weight(index, time);
+        q += complex_divide(weight, source - z);
     }
     return q;
 }
@@ -63,6 +95,7 @@ void main() {
     float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y) * u_zoom;
     vec2 pixel = gl_FragCoord.xy - 0.5 * u_resolution;
     vec2 z = pixel / pixel_radius;
+    float view_radius = length(0.5 * u_resolution) / pixel_radius;
 
     float phase = 0.0;
     float log_modulus = 0.0;
@@ -84,9 +117,10 @@ void main() {
         log_modulus -= 0.5 * log(radius_squared);
     }
 
-    // H(z) = exp(q(z)) is entire and nonzero, so it changes neither zeros nor
-    // poles. Re(q) adds to log modulus and Im(q) adds to phase exactly.
-    vec2 q = holomorphic_q(z);
+    // q_t is holomorphic throughout the visible region because every Cauchy
+    // source stays outside its circumscribed view disk. exp(q_t) is therefore
+    // nonzero on the visible region and preserves the explicit divisor there.
+    vec2 q = holomorphic_field(z, u_time, view_radius);
     log_modulus += q.x;
     phase += q.y;
 
