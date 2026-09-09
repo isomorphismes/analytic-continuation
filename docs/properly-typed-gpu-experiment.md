@@ -50,4 +50,22 @@ On the Android 34 x86-64 emulator using Google SwiftShader GLES3:
 
 The failed strong-motion gate is not a compiler/render-equivalence failure: the frozen handwritten and compiler-generated fields matched to at most one 8-bit channel value, and the live generated shader loaded, rendered, and responded while the coefficient workers advanced. It is retained as a separate motion-quality result rather than being converted into a false GPU acceptance claim.
 
-Physical PowerVR-device acceptance remains open and must not be inferred from SwiftShader execution.
+## Mali-G57 backend probe
+
+The tablet-specific Mali optimization branch was tested against this exact large typed fragment using shader-backend commit `a855d89ab0f25025d825afdc194f492e4c00ecff`. The complex arithmetic follower from `4360f29d3bbdc09b4cc513e4a6be647f290ffede` was overlaid without otherwise changing the Mali compiler so that the same source could be compared directly.
+
+The same source was compiled three ways: generic highp, Mali highp, and Mali mediump. All three generated shaders validated as GLSL ES.
+
+The measured output was:
+
+| compiler | precision | shader bytes | shader lines | IR lines | `atan` | `log` | real `if` | ternary selects |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| generic follower | highp | 49,749 | 1,053 | 1,159 | 64 | 64 | 0 | 68 |
+| Mali optimization branch | highp | 49,749 | 1,053 | 1,159 | 64 | 64 | 0 | 68 |
+| Mali optimization branch | mediump | 49,751 | 1,053 | 1,159 | 64 | 64 | 0 | 68 |
+
+For this workload the Mali highp output is therefore structurally identical to the generic output. Its structured expensive-branch optimization does not reach the current fragment, so all 32 zero slots and 32 pole slots retain their eager `atan`/`log` work. The only observed effect of the mediump build is the requested global precision declaration; it does not repair the control-flow problem.
+
+This is consistent with the Mali branch's deliberate current structure-analysis limit of 256 linear bindings. This fragment is much larger. The correct follow-up is not to raise that limit mechanically: the backend needs scalable use/liveness analysis or preservation of structured source control flow so inactive factors can skip their expensive work.
+
+Physical Mali-G57 execution of an actually improved generated fragment remains the useful next device test. Physical PowerVR-device acceptance is separate and also remains open.
