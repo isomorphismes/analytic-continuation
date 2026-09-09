@@ -1,0 +1,97 @@
+name: properly typed Android runtime retry
+
+on:
+  push:
+    branches:
+      - properly-typed
+    paths:
+      - 'tools/run_properly_typed_android_probe.sh'
+      - '.github/workflows/properly-typed-runtime-retry.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SOURCE_BUILD_RUN_ID: 34307476866
+  SOURCE_BUILD_SHA: e7faefa8cba484e1a3ec5f2e54f8593f5e3e25cd
+
+jobs:
+  run-built-apks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out probe runner
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install image comparison support
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes python3-pil
+
+      - name: Download APKs and compiler evidence from the completed build
+        uses: actions/download-artifact@v4
+        with:
+          name: properly-typed-android-probe
+          path: build/properly-typed
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.SOURCE_BUILD_RUN_ID }}
+
+      - name: Verify downloaded build identity
+        run: |
+          test -s build/properly-typed/handwritten-core-frozen.apk
+          test -s build/properly-typed/properly-typed-core-frozen.apk
+          test -s build/properly-typed/properly-typed-probe.apk
+          test -s build/properly-typed/analytic-continuation-handwritten-core.ir
+          printf 'source build sha: %s\n' "$SOURCE_BUILD_SHA"
+
+      - name: Enable KVM permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | \
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Compare frozen frames and exercise live compiler-generated core
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: medium_phone
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
+          script: bash tools/run_properly_typed_android_probe.sh
+
+      - name: Write runtime receipt
+        if: success()
+        run: |
+          cat > build/properly-typed/runtime-receipt.tsv <<EOF
+          PROPERLY_TYPED_ANDROID_RUNTIME_RECEIPT	1
+          source_build_sha	${SOURCE_BUILD_SHA}
+          source_build_run_id	${SOURCE_BUILD_RUN_ID}
+          stage	shader_load	PASS	Android emulator GLES3/SwiftShader
+          stage	gpu_execution	PASS	Android emulator GLES3/SwiftShader
+          stage	framebuffer_comparison	PASS	frozen handwritten core versus frozen compiler-generated core
+          stage	live_typed_motion	PASS	compiler-generated core driven by live holomorphic coefficients
+          stage	vendor_device_receipt	SKIP	physical PowerVR phone acceptance remains separate
+          EOF
+          cat build/properly-typed/runtime-receipt.tsv
+
+      - name: Retain runtime evidence and APKs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: properly-typed-android-runtime
+          path: build/properly-typed
+          if-no-files-found: error
