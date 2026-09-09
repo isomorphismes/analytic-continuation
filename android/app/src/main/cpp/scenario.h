@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "field_evolution.h"
 #include "motion.h"
 #include "presentation.h"
 #include "scene.h"
@@ -15,7 +16,9 @@ struct scenario {
     struct scene scene;
     struct motion_program motion;
     struct presentation_config presentation;
+    enum field_background_mode field_background;
     float field_speed;
+    float field_budget;
 };
 
 void scenario_initialize_interactive(struct scenario *scenario);
