@@ -17,6 +17,7 @@ uniform int u_pole_count;
 uniform vec2 u_zero_positions[MAX_FACTORS];
 uniform vec2 u_pole_positions[MAX_FACTORS];
 uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];
+uniform int u_remote_poles_enabled;
 uniform float u_remote_pole_time;
 uniform float u_zoom;
 uniform int u_placement_kind;
@@ -135,12 +136,14 @@ void main() {
     // These twenty-four poles stay outside the circumscribed visible region.
     // Their factor is therefore holomorphic and nonzero on the visible region,
     // though not entire on the whole complex plane.
-    for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
-        vec2 pole = remote_pole_position(index, view_outer_radius);
-        vec2 delta = z - pole;
-        float radius_squared = max(dot(delta, delta), 1.0e-16);
-        phase -= atan(delta.y, delta.x);
-        log_modulus -= 0.5 * log(radius_squared);
+    if (u_remote_poles_enabled != 0) {
+        for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
+            vec2 pole = remote_pole_position(index, view_outer_radius);
+            vec2 delta = z - pole;
+            float radius_squared = max(dot(delta, delta), 1.0e-16);
+            phase -= atan(delta.y, delta.x);
+            log_modulus -= 0.5 * log(radius_squared);
+        }
     }
 
     vec2 q = holomorphic_q(z);
