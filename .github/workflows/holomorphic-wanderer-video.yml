@@ -26,17 +26,13 @@ jobs:
       - name: Install native Android toolchain
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
-      - name: Build the holomorphic-tag application
-        working-directory: android
-        run: ./gradlew --no-daemon :app:assembleDebug
-
       - name: Enable KVM permissions
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Run the app, wander the divisor, and record it
+      - name: Run the clean stronger holomorphic presentation and record it
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -47,11 +43,7 @@ jobs:
           ram-size: 3072M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
-          script: |
-            sed -i 's/adb shell wm size 720x1280/adb shell wm size 180x320/' video/capture_holomorphic_wanderers.sh
-            sed -i 's/adb shell wm density 320/adb shell wm density 120/' video/capture_holomorphic_wanderers.sh
-            sed -i 's/screenrecord --bit-rate 10000000 --time-limit 23/screenrecord --size 320x180 --bit-rate 2500000 --time-limit 23/' video/capture_holomorphic_wanderers.sh
-            bash video/capture_holomorphic_wanderers.sh
+          script: bash video/capture_holomorphic_wanderers.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
