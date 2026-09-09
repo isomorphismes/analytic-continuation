@@ -25,16 +25,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests -v
-      - name: Smoke-test three holomorphic direction workers
-        run: |
-          cc -std=c11 -Wall -Wextra -Werror \
-            -Iandroid/app/src/main/cpp \
-            tests/test_holomorphic_walk.c \
-            android/app/src/main/cpp/holomorphic_walk.c \
-            -pthread -lm \
-            -o /tmp/test-holomorphic-walk
-          /tmp/test-holomorphic-walk
-      - name: Reject migrated Lacunary machinery in the live app
+      - name: Reject retired CPU walk and migrated Lacunary machinery
         run: |
           test ! -e android/app/src/main/cpp/analytic_continuation.c
+          test ! -e android/app/src/main/cpp/holomorphic_walk.c
+          test ! -e android/app/src/main/cpp/holomorphic_walk.h
+          ! grep -RniE 'holomorphic_walk|u_holomorphic_coefficients|deformation_velocity|deformation_accepted_steps' android/app/src/main/cpp android/app/src/main/assets/continuation.frag.in
           ! grep -RniE 'lasso_map|inverse_lasso|dragging_lasso|lasso_coefficients|continuation_path' android/app/src/main/cpp android/app/src/main/assets/continuation.frag.in

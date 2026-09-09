@@ -1,272 +1,220 @@
 # Holomorphic explorer mathematical contract
 
-This document fixes the mathematics of the live explorer independently of CPU threads, GPU backends, shader languages, and performance experiments.
+This document states the mathematics of the live `cauchy-field` experiment independently of the particular GPU and Android implementation.
 
-The renderer may approximate these formulas numerically. It must not redefine the mathematical object in order to fit a particular implementation.
+The current contract is **local to the visible region**. It deliberately differs from the stronger requirement that the moving factor be entire on all of `C`.
 
-## 1. The live object
+## 1. Live object
 
 The explorer displays
 
 ```text
 f_t(z) = R(z) H_t(z)
+H_t(z) = exp(q_t(z))
 ```
 
-on the ordinary complex plane.
-
-`R` carries the explicit finite meromorphic divisor chosen by the user:
+where `R` carries the explicit zeros and poles selected by the user:
 
 ```text
 R(z) = gain * product_i (z - a_i)^(m_i)
               / product_j (z - b_j)^(n_j)
 ```
 
-where the `a_i` are zeros, the `b_j` are poles, and multiplicity is explicit.
+The moving field is
 
-The live freedom is a nonvanishing entire factor
+```text
+q_t(z) = sum_k a_k / (xi_k(t) - z).
+```
+
+The `xi_k(t)` are Cauchy sources kept outside a disk containing the entire visible viewport. The complex weights `a_k` are deterministic and nonzero; in the current version they are fixed in time so visible evolution comes from source motion.
+
+## 2. Visible-region invariant
+
+Let `V` be the visible rectangle in complex coordinates, and let `r_view` be the radius of its circumscribed disk centered at the origin.
+
+The orbital source construction uses
+
+```text
+base radius = 1.8 r_view
+radial bend in [-0.35 r_view, +0.35 r_view]
+ellipticity in [-0.08, +0.08]
+```
+
+Before elliptic distortion, the radial scale therefore lies in
+
+```text
+1.45 r_view <= radius <= 2.15 r_view.
+```
+
+The elliptic scale on either coordinate is never smaller than `0.92`, hence
+
+```text
+|xi_k(t)| >= 0.92 * 1.45 r_view = 1.334 r_view > r_view.
+```
+
+Every source remains strictly outside the circumscribed view disk. Hence each kernel
+
+```text
+1 / (xi_k(t) - z)
+```
+
+is holomorphic on a neighborhood of the visible region. Their finite sum `q_t` is holomorphic there, and
 
 ```text
 H_t(z) = exp(q_t(z))
 ```
 
-with `q_t` entire.
+is holomorphic and nonzero there.
 
-Therefore every displayed state is meromorphic on the ordinary complex plane and has exactly the finite zeros and poles supplied by `R`. The holomorphic motion cannot create, remove, or move that divisor.
+Consequently, **within the visible region**, multiplying by `H_t` neither creates nor removes zeros or poles. The visible divisor is exactly the divisor contributed by `R`.
 
-The current implementation uses a small polynomial `q_t`. That is a finite computational coordinate system, not a claim that all entire functions are finite polynomials.
+## 3. This is not a whole-plane meromorphic model
 
-## 2. Why `exp(q)` is structural rather than cosmetic
+The off-screen singularities are mathematically real even though they are not drawn.
 
-If two meromorphic functions on `C` have the same finite zeros and poles with the same multiplicities, their quotient has no zeros or poles. When that quotient is entire and nonvanishing, it has an entire logarithm because `C` is simply connected. Thus the quotient can be written as `exp(q)` for an entire `q`.
-
-So
+Each `q_t` has poles at the `xi_k(t)`. Because the source weights are nonzero, exponentiating `q_t` produces essential singularities at those points. Thus the global function
 
 ```text
-explicit divisor * exp(entire freedom)
+R(z) exp(q_t(z))
 ```
 
-is the natural whole-plane model for this explorer.
+is not a meromorphic function on all of `C` whose only finite singularities are the explicit poles of `R`.
 
-## 3. Whole-plane requirement
+A whole-plane design would require `q_t` to be entire. That is a different model and remains a legitimate alternative, but it is not the semantics of this branch.
 
-For this repository, `q` must be entire, not merely holomorphic on the current viewport.
+No documentation, test, or backend should describe the Cauchy-field construction as entire merely because its singularities are off screen.
 
-A basis function with a pole outside the screen is still not an admissible whole-plane perturbation. Exponentiating such a function generally turns that pole into an essential singularity, so the result is no longer the intended meromorphic plane with only the explicit poles of `R`.
+## 4. Viewport dependence
 
-Local-domain, chart, lasso, and bounded-disc constructions belong in `isomorphismes/lacunary`.
+The source radius is defined from `r_view`, so the hidden source configuration is viewport-relative.
 
-## 4. Gauge: do not mistake a global recoloring for mathematical motion
+Changing zoom changes `r_view` and therefore changes the source positions used to define `q_t`. In this experimental model, zoom is consequently not a mathematically passive camera operation: it changes the moving field while maintaining the invariant that all Cauchy singularities remain outside the visible region.
 
-Adding a complex constant `c` to `q` multiplies the entire portrait by `exp(c)`:
+If a later design requires zoom to leave the mathematical function fixed, source placement will need a different rule.
+
+## 5. Time evolution
+
+The source trajectories use the smooth orbital geometry promoted on `main`:
+
+- deterministic initial directions;
+- per-source angular speeds between `0.11` and `0.19` radians per second;
+- deterministic clockwise or counterclockwise handedness;
+- a smooth radial bend tied to orbital phase;
+- slight ellipticity bounded by 8%.
+
+The source count is
 
 ```text
-Re(c)  -> global modulus scale
-Im(c)  -> global phase rotation
+SOURCE_COUNT = 24.
 ```
 
-Those degrees of freedom can be useful controls, but they should not masquerade as interesting local holomorphic motion.
+The fixed source-weight amplitudes satisfy
 
-The present polynomial prototype omits the constant term, equivalently fixing `q(0) = 0`. A future basis may use another explicit gauge, but the gauge must be stated.
+```text
+0.08 <= |a_k| <= 0.35.
+```
 
-## 5. Exact quantities supplied to Wegert
+There is no coefficient search, sample-point disturbance score, accepted-step counter, coefficient budget, or CPU worker ensemble in the mathematical evolution.
 
-There is no mathematical reason for the renderer to evaluate the complex exponential explicitly.
+The CPU supplies elapsed time. Every fragment evaluates the same `q_t` at its own complex coordinate `z`.
+
+## 6. Exact quantities supplied to Wegert
+
+There is no need to evaluate the complex exponential explicitly for coloring.
 
 For
 
 ```text
-f(z) = R(z) exp(q(z))
+f(z) = R(z) exp(q(z)),
 ```
 
 we have exactly
 
 ```text
 log|f(z)| = log|R(z)| + Re(q(z))
-phase(f(z)) = phase(R(z)) + Im(q(z))
+phase(f(z)) = phase(R(z)) + Im(q(z)).
 ```
 
-The mathematical renderer boundary is therefore
+The renderer boundary is therefore
 
 ```text
-explicit zero/pole contribution
+explicit zero/pole contribution from R
 + Re(q), Im(q)
 -> phase, log modulus
 -> canonical Wegert value/color behavior
--> interaction overlays
+-> interaction overlays.
 ```
 
-RGB differences and screen derivatives are not substitutes for complex derivatives or holomorphy.
+RGB differences and screen derivatives are not substitutes for complex holomorphy.
 
-## 6. Local infinitesimal motion
+## 7. Why the Cauchy family is structurally useful
 
-For an infinitesimal change `delta q`,
+The kernels
 
 ```text
-delta log|H(z)| = Re(delta q(z))
-delta phase(H(z)) = Im(delta q(z))
+1 / (xi - z)
 ```
 
-These are exact analytic sensitivities.
+are not basis-free, but they arise directly from the Cauchy-integral picture of holomorphic functions. Moving exterior source data produces a global, smooth deformation felt at every visible point without fitting a small polynomial coefficient vector on the CPU.
 
-A local derivative may also be used when the desired perturbation is stated in terms of local slope rather than local value. Which local functional is prescribed is part of the mathematical question; it must not be inferred from GPU convenience.
+This is the practical reason for the experiment. It does not imply that this finite family parameterizes every holomorphic function on the viewport.
 
-## 7. Canonical least-disturbing direction
+## 8. Separation of responsibilities
 
-A canonical direction does not require a visual-energy heuristic.
+The live mathematical field owns:
 
-Choose a Hilbert space `A` of admissible holomorphic perturbations in which point evaluation is continuous. Let `K(z,a)` be its reproducing kernel. If we require a perturbation `phi` to satisfy
+- the explicit Cauchy-source formula;
+- source trajectories and complex weights;
+- the invariant that all hidden sources stay outside the visible region;
+- the resulting `q_t`.
+
+The GPU owns:
+
+- evaluating the source descriptors efficiently for each fragment;
+- producing `Re(q_t)` and `Im(q_t)`;
+- combining them with the rational zero/pole contribution.
+
+The CPU owns:
+
+- elapsed time;
+- visible zero/pole interaction state;
+- viewport state;
+- Android/EGL integration.
+
+Wegert owns the reusable complex-value / phase / log-modulus to phase-portrait color boundary.
+
+## 9. Interaction invariants
+
+The user-visible circles and X marks retain their mathematical types while moving:
+
+- a zero remains a zero;
+- a pole remains a pole;
+- dragging changes its position in `R`;
+- the Cauchy field does not convert one into the other.
+
+Pinch zoom is currently permitted over the range `0.1` through `32.0`.
+
+## 10. Acceptance
+
+Before treating a build as evidence for this branch, checks should establish at least:
+
+1. the CPU worker/coefficients architecture is absent from the active build;
+2. the shader receives elapsed time and evaluates the Cauchy field per fragment;
+3. all synthesized source positions remain outside the circumscribed visible radius;
+4. the Cauchy contribution is added to phase/log modulus before the Wegert color boundary;
+5. the explicit zero/pole interaction still works;
+6. the running APK shows actual frame-to-frame field motion;
+7. the APK and runtime screenshots are retained so motion and zoom can be judged from execution rather than inferred from CI;
+8. runtime evidence comes from the app actually executing, not from interpolated or reconstructed frames.
+
+## 11. Whole-plane entire model as an alternative
+
+If the explorer later returns to the stronger requirement that the moving factor be globally nonvanishing entire, then `q_t` must again be entire. Exterior Cauchy poles would not be admissible.
+
+A whole-plane reproducing-kernel model such as a Bargmann-Fock space remains one possible direction. For example, with scale `s`, a value-normalized entire representer can take the form
 
 ```text
-phi(a) = 1
+phi_a(z) = exp((z conjugate(a) - |a|^2) / s^2).
 ```
 
-then the unique minimum-norm solution is
-
-```text
-phi_a(z) = K(z,a) / K(a,a).
-```
-
-This is the precise meaning of a canonical direction of least holomorphic disturbance for a prescribed local value change.
-
-More generally, if the prescribed local datum is a derivative or another continuous linear functional, its Riesz/reproducing representer gives the corresponding unique minimum-norm direction after normalization.
-
-Thus the mathematical pipeline can be
-
-```text
-choose anchor/local datum
--> compute its canonical minimum-norm holomorphic representer
--> choose a small amplitude/sign/time law
--> add that direction to q
--> render the resulting exact holomorphic state
-```
-
-The user remains the visual arbiter of anchor selection, amplitude, timing, overlap, persistence, and whether the resulting motion looks good.
-
-## 8. Historical Bergman-disk construction
-
-The historical `local-holomorphic-perturbations` experiment used the unit-disc Bergman extremal
-
-```text
-phi_a(z) = (1 - |a|^2)^2 / (1 - conjugate(a) z)^2
-```
-
-which satisfies `phi_a(a) = 1` and is the minimum Bergman-norm holomorphic function on the disc with that value.
-
-That correctly demonstrated the canonical-direction idea on a bounded disc. It is not, by itself, the whole-plane basis for this repository: for `a != 0` it has a pole at `1 / conjugate(a)` outside the unit disc, and `exp(phi_a)` would have an essential singularity there.
-
-Do not revive that hidden singularity merely because the kernel was useful in the old local experiment.
-
-## 9. Whole-plane reproducing-kernel direction
-
-If we want the same extremal construction using entire functions, the admissible Hilbert space must itself consist of entire functions.
-
-A natural candidate is a Bargmann-Fock space with an explicit length scale `s`. Its reproducing kernel has the form
-
-```text
-K_s(z,a) = exp(z conjugate(a) / s^2)
-```
-
-up to the chosen normalization convention. The value-normalized extremal is therefore
-
-```text
-phi_a(z) = exp((z conjugate(a) - |a|^2) / s^2)
-```
-
-which is entire and satisfies `phi_a(a) = 1`.
-
-This is a mathematically clean whole-plane candidate for canonical local perturbations. The choice of function-space norm and the scale `s` are modeling choices, not universal aesthetic truths. They should be exposed to visual evaluation rather than smuggled in as GPU constants.
-
-If the gauge removes constant motion, use the corresponding gauge-fixed subspace or a derivative constraint rather than silently reintroducing the constant mode.
-
-The exact whole-plane perturbation space is therefore a mathematical/design decision to settle before optimizing a GPU implementation. The invariant that its elements are entire is not optional.
-
-## 10. What randomness means
-
-Randomness may choose:
-
-- an anchor point;
-- whether the local datum is phase/value/derivative oriented;
-- sign or phase of the infinitesimal change;
-- amplitude within an accepted bound;
-- lifetime and temporal overlap with other perturbations.
-
-Randomness does not certify holomorphy. The admitted function space and exact formulas do that.
-
-The number of CPU workers is not mathematics. Three workers plus a coordinator was a useful implementation shape for a four-thread phone, but another CPU, x86-64 implementation, or GPU backend may schedule the same mathematical descriptors differently.
-
-## 11. Current polynomial prototype
-
-The current implementation uses
-
-```text
-q(u) = c1 u + c2 u^2 + ... + c5 u^5
-u = z / 6
-```
-
-and a coefficient envelope
-
-```text
-sum_k |c_k| <= 0.72.
-```
-
-Because the basis is polynomial, every state is entire regardless of this coefficient bound. The bound is therefore not a holomorphy test.
-
-On `|u| <= 1`, the triangle inequality gives
-
-```text
-|q(u)| <= sum_k |c_k| <= 0.72.
-```
-
-So the bound is usefully interpreted as an amplitude/numerical envelope on the reference disc. Any stronger meaning must be proved separately.
-
-The present 128-candidate, three-worker score is a provisional CPU exploration strategy. It is not the definition of the canonical holomorphic direction and must not become part of the mathematical semantics merely because it exists in working code.
-
-## 12. Safe motion descriptors
-
-If an implementation publishes a segment
-
-```text
-c(tau) = c0 + tau d,
-0 <= tau <= tau_max,
-```
-
-then every intermediate `q_tau` remains entire automatically when the basis functions are entire.
-
-If the accepted coefficient set is convex, such as the current `sum |c_k| <= B` ball, endpoints inside the set imply the whole line segment stays inside that particular bound.
-
-Other numerical, amplitude, derivative, or application-specific bounds must be named separately. Do not call them holomorphy checks.
-
-## 13. Separation of responsibilities
-
-The mathematical evolution engine owns:
-
-- the admissible entire perturbation space;
-- canonical local representers/directions;
-- random selection of local data when desired;
-- amplitude and safe-extent rules;
-- the resulting `q_t` or compact descriptor.
-
-The GPU/backend owns:
-
-- numerically evaluating an already-defined mathematical descriptor efficiently;
-- producing `Re(q)` and `Im(q)` or equivalent exact quantities;
-- preserving stated error bounds.
-
-Wegert owns the reusable rendering preference boundary from complex value / phase / log modulus to the canonical phase portrait.
-
-The user owns the final visual judgment about what motion is worth keeping.
-
-## 14. Acceptance before GPU optimization
-
-Before backend-specific optimization, host/reference tests should establish at least:
-
-1. the chosen basis/representers are entire;
-2. the canonical representer satisfies its prescribed local value or derivative condition;
-3. the claimed minimum-norm property matches the chosen Hilbert space;
-4. `exp(q)` never changes the explicit zero/pole divisor;
-5. phase/log-modulus updates agree with `Re(q)`/`Im(q)`;
-6. any coefficient/amplitude bound is described by the theorem it actually satisfies;
-7. safe segments remain inside every claimed convex bound;
-8. the current CPU heuristic is clearly labeled as an approximation/scheduling strategy rather than the mathematical definition.
-
-Only after those are stable should PowerVR, FP16/FP32, fragment/compute division, register pressure, or other backend details be allowed to influence implementation choices.
+That model and the present viewport-relative Cauchy-source model answer different mathematical design questions. They should not be conflated.

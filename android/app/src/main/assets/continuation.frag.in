@@ -5,8 +5,7 @@ precision highp int;
 /*__WEGERT_COLOR_CORE__*/
 
 #define MAX_FACTORS 32
-#define HOLOMORPHIC_COEFFICIENT_COUNT 5
-#define REMOTE_POLE_COUNT 24
+#define SOURCE_COUNT 24
 
 in vec2 v_ndc;
 out vec4 frag_color;
@@ -16,66 +15,44 @@ uniform int u_zero_count;
 uniform int u_pole_count;
 uniform vec2 u_zero_positions[MAX_FACTORS];
 uniform vec2 u_pole_positions[MAX_FACTORS];
-uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];
-uniform float u_remote_pole_time;
+uniform float u_time;
 uniform float u_zoom;
 uniform int u_placement_kind;
 
-vec2 complex_multiply(vec2 left, vec2 right) {
+vec2 complex_divide(vec2 numerator, vec2 denominator) {
+    float magnitude_squared = max(dot(denominator, denominator), 1.0e-12);
     return vec2(
-        left.x * right.x - left.y * right.y,
-        left.x * right.y + left.y * right.x
+        (numerator.x * denominator.x + numerator.y * denominator.y) /
+            magnitude_squared,
+        (numerator.y * denominator.x - numerator.x * denominator.y) /
+            magnitude_squared
     );
-}
-
-vec2 holomorphic_q(vec2 z) {
-    // Keep the normalization fixed in the mathematical plane rather than tied
-    // to zoom, but make the live entire factor large enough to read on a phone.
-    vec2 u = z / 3.0;
-    vec2 power = u;
-    vec2 q = vec2(0.0);
-    for (int index = 0; index < HOLOMORPHIC_COEFFICIENT_COUNT; ++index) {
-        q += complex_multiply(u_holomorphic_coefficients[index], power);
-        power = complex_multiply(power, u);
-    }
-    return q;
 }
 
 float hash1(float x) {
     return fract(sin(x * 127.1 + 31.7) * 43758.5453123);
 }
 
-vec2 remote_pole_direction(int index) {
-    float k = float(index);
-    float angle = 6.2831853 * hash1(k + 0.11);
-    return vec2(cos(angle), sin(angle));
-}
-
-float remote_pole_radius_scale(int index) {
-    float k = float(index);
-    return mix(2.75, 4.00, hash1(k + 1.73));
-}
-
-float remote_pole_orbit_speed(int index) {
+float source_orbit_speed(int index) {
     float k = float(index);
     return mix(0.11, 0.19, hash1(k + 4.37));
 }
 
-float remote_pole_handedness(int index) {
+float source_handedness(int index) {
     float k = float(index);
     return hash1(k + 7.91) < 0.5 ? -1.0 : 1.0;
 }
 
-vec2 remote_pole_position(int index, float view_outer_radius) {
+vec2 source_position(int index, float time, float view_radius) {
     float k = float(index);
-    vec2 initial_direction = remote_pole_direction(index);
-    float initial_angle = atan(initial_direction.y, initial_direction.x);
+    float initial_angle = 6.2831853 * hash1(k + 0.11);
     float angle = initial_angle
-        + remote_pole_handedness(index) * remote_pole_orbit_speed(index) * u_remote_pole_time;
+        + source_handedness(index) * source_orbit_speed(index) * time;
 
     float bend_phase = 6.2831853 * hash1(k + 11.23);
-    float radial_bend = 0.22 * sin(2.0 * angle + bend_phase);
-    float radius = remote_pole_radius_scale(index) + radial_bend;
+    float base = 1.8 * view_radius;
+    float radial = 0.35 * view_radius * sin(2.0 * angle + bend_phase);
+    float radius = base + radial;
 
     float ellipticity = mix(-0.08, 0.08, hash1(k + 14.67));
     vec2 orbit = vec2(
@@ -83,7 +60,24 @@ vec2 remote_pole_position(int index, float view_outer_radius) {
         (1.0 - ellipticity) * sin(angle)
     );
 
-    return view_outer_radius * radius * orbit;
+    return radius * orbit;
+}
+
+vec2 source_weight(int index) {
+    float k = float(index);
+    float amplitude = mix(0.08, 0.35, hash1(k + 17.8));
+    float phase = 6.2831853 * hash1(k + 21.4);
+    return amplitude * vec2(cos(phase), sin(phase));
+}
+
+vec2 holomorphic_field(vec2 z, float time, float view_radius) {
+    vec2 q = vec2(0.0);
+    for (int index = 0; index < SOURCE_COUNT; ++index) {
+        vec2 source = source_position(index, time, view_radius);
+        vec2 weight = source_weight(index);
+        q += complex_divide(weight, source - z);
+    }
+    return q;
 }
 
 float circle_mask(vec2 point, vec2 center, float radius) {
@@ -110,7 +104,7 @@ void main() {
     float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y) * u_zoom;
     vec2 pixel = gl_FragCoord.xy - 0.5 * u_resolution;
     vec2 z = pixel / pixel_radius;
-    float view_outer_radius = length(0.5 * u_resolution) / pixel_radius;
+    float view_radius = length(0.5 * u_resolution) / pixel_radius;
 
     float phase = 0.0;
     float log_modulus = 0.0;
@@ -132,20 +126,12 @@ void main() {
         log_modulus -= 0.5 * log(radius_squared);
     }
 
-    // Twenty-four additional X singularities stay well outside the circumscribed
-    // visible region. They move continuously as the existing live state moves,
-    // and every fragment evaluates their meromorphic influence directly.
-    for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
-        vec2 pole = remote_pole_position(index, view_outer_radius);
-        vec2 delta = z - pole;
-        float radius_squared = max(dot(delta, delta), 1.0e-16);
-        phase -= atan(delta.y, delta.x);
-        log_modulus -= 0.5 * log(radius_squared);
-    }
-
-    // H(z) = exp(q(z)) is entire and nonzero, so it changes neither zeros nor
-    // poles. Re(q) adds to log modulus and Im(q) adds to phase exactly.
-    vec2 q = holomorphic_q(z);
+    // q_t is holomorphic throughout the visible region because every Cauchy
+    // source stays outside its circumscribed view disk. exp(q_t) is therefore
+    // nonzero on the visible region and preserves the explicit divisor there.
+    // Globally these sources remain genuine poles of q_t and essential
+    // singularities of exp(q_t); this is not a whole-plane entire model.
+    vec2 q = holomorphic_field(z, u_time, view_radius);
     log_modulus += q.x;
     phase += q.y;
 
