@@ -6,10 +6,18 @@
 
 #include "holomorphic_walk.h"
 
+enum field_background_mode {
+    FIELD_BACKGROUND_ENTIRE = 0,
+    FIELD_BACKGROUND_WANDERING_OFFSCREEN_POLES = 1
+};
+
 struct field_evolution {
     float coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
     float velocity[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
+    enum field_background_mode background_mode;
     float speed;
+    float coefficient_budget;
+    float remote_pole_time;
     float last_score;
     double last_time;
     double last_publish;
@@ -20,7 +28,9 @@ struct field_evolution {
 
 void field_evolution_initialize(
     struct field_evolution *field,
+    enum field_background_mode background_mode,
     float speed,
+    float coefficient_budget,
     double now
 );
 
