@@ -1,0 +1,54 @@
+name: Publish approved holomorphic APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-holomorphic-approved.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TARGET_SHA: 6b4ebc10bf45f1e281cdde760a54db50d0263d12
+      TAG: holomorphic
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ env.TARGET_SHA }}
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install Android build inputs
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Build approved APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Name and verify APK
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk holomorphic.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs holomorphic.apk > /tmp/signing.txt
+          grep -Fqi '27eee69b1cbeebc30eab35fe7eb5459c542784b4ccc68453a372cb6802ccf7cf' /tmp/signing.txt
+          test -s holomorphic.apk
+
+      - name: Create tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" holomorphic.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title 'holomorphic.apk' \
+            --notes 'Phone-approved holomorphic explorer build with visibly moving divisor-preserving perturbations.'
