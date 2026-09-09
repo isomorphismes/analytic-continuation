@@ -152,7 +152,7 @@ class WegertColorParityTests(unittest.TestCase):
         template = TEMPLATE_PATH.read_text()
         color_boundary = template.index(WEGERT_CALL)
         overlay_tokens = (
-            "float mark = ring_mask(gl_FragCoord.xy, center, 9.0, 5.0);",
+            "float mark = ring_mask(gl_FragCoord.xy, center, marker_radius, zero_inner);",
             "bool zero_selected = u_placement_kind == 0;",
             "float zero_disk = circle_mask(gl_FragCoord.xy, zero_center, placement_radius);",
         )
