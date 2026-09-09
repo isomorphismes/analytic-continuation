@@ -16,6 +16,8 @@ uniform int u_pole_count;
 uniform vec2 u_zero_positions[MAX_FACTORS];
 uniform vec2 u_pole_positions[MAX_FACTORS];
 uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];
+uniform int u_remote_poles_enabled;
+uniform float u_remote_pole_time;
 uniform float u_zoom;
 uniform int u_placement_kind;
 uniform int u_show_controls;
@@ -82,6 +84,12 @@ void main() {
         float radius_squared = max(dot(delta, delta), 1.0e-16);
         phase -= atan(delta.y, delta.x);
         log_modulus -= 0.5 * log(radius_squared);
+    }
+
+    // Keep the uniform contract shared with the remote-pole shader without
+    // burdening the ordinary entire-field path with the remote-pole loop.
+    if (u_remote_poles_enabled != 0) {
+        log_modulus += 1.0e-20 * u_remote_pole_time;
     }
 
     // H(z) = exp(q(z)) is entire and nonzero, so it changes neither zeros nor
