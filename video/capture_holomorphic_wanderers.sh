@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The first attempt drove the markers with separate adb swipe commands, which made
-# the video visibly stop/start. For this capture, make the actual app own the
-# trajectories. The holomorphic soup keeps advancing in the normal app loop while
-# the divisor positions are updated every frame.
+# Presentation build derived from the tagged holomorphic explorer. The app itself
+# owns both the live holomorphic soup and the divisor trajectories. The capture
+# contains only the mathematical visualization: no generated/interpolated frames,
+# no adb-driven marker motion, no app controls, and no Android system chrome.
 python3 - <<'PY'
 from pathlib import Path
 
@@ -93,8 +93,8 @@ static void advance_wandering_divisor(struct engine *engine) {
         engine->wander_start_time = now;
     }
 
-    /* Let the soup establish itself, then wander continuously for 16 seconds. */
-    float raw = (float)((now - engine->wander_start_time - 5.0) / 16.0);
+    /* Let the stronger holomorphic soup establish itself, then wander for 16 s. */
+    float raw = (float)((now - engine->wander_start_time - 4.0) / 16.0);
     float progress = wander_smoothstep(raw);
 
     for (int index = 0; index < 3; ++index) {
@@ -131,13 +131,24 @@ new = '''        if (engine.display != EGL_NO_DISPLAY && engine.focused) {\n    
 if text.count(old) != 1:
     raise SystemExit('could not patch animation loop')
 text = text.replace(old, new, 1)
-
 path.write_text(text)
+
+# Presentation shader: retain the real mathematical renderer and marker overlays,
+# but suppress the two placement buttons. Keep u_placement_kind live so the native
+# uniform contract remains unchanged.
+shader_path = Path('android/app/src/main/assets/continuation.frag.in')
+shader = shader_path.read_text()
+start_marker = '    float placement_radius = clamp('
+end_marker = '    frag_color = vec4(color, 1.0);'
+start = shader.find(start_marker)
+end = shader.find(end_marker)
+if start < 0 or end < 0 or end <= start:
+    raise SystemExit('could not locate placement controls in presentation shader')
+replacement = '''    // Presentation capture: no noninteractive placement controls.\n    if (u_placement_kind == -2147483647) {\n        color = color.bgr;\n    }\n\n    frag_color = vec4(color, 1.0);'''
+shader = shader[:start] + replacement + shader[end + len(end_marker):]
+shader_path.write_text(shader)
 PY
 
-# Rebuild after injecting the smooth in-app wanderer. This is still the actual
-# holomorphic application derived from the holomorphic tag; there are no generated
-# frames, no interpolation and no adb-driven marker jumps in the recording.
 (
     cd android
     ./gradlew --no-daemon :app:assembleDebug
@@ -146,13 +157,19 @@ PY
 apk="android/app/build/outputs/apk/debug/app-debug.apk"
 activity="org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity"
 
-adb shell wm size 720x1280
-adb shell wm density 320
-adb install -r "$apk"
+# Portrait physical dimensions become a 960x540 landscape surface when the
+# ExplorerActivity locks to landscape. Force immersive mode before launch so the
+# screen recording contains no clock/status/navigation chrome.
+adb shell wm size 540x960
+adb shell wm density 160
 adb shell settings put secure immersive_mode_confirmations confirmed
+adb shell settings put global policy_control immersive.full=*
+adb install -r "$apk"
 adb logcat -c
 adb shell am start -W -n "$activity"
 sleep 3
+adb shell settings put global policy_control immersive.full=*
+sleep 1
 
 adb logcat -d > holomorphic-wanderers.log
 grep -Fq 'holomorphic field started with 3 workers' holomorphic-wanderers.log
@@ -168,9 +185,8 @@ test -n "$height"
 
 adb exec-out screencap -p > holomorphic-wanderers-start.png
 
-# Nothing drives the markers from adb. The app updates all six trajectories at
-# its normal animation cadence while the holomorphic field evolves independently.
-adb shell screenrecord --bit-rate 10000000 --time-limit 23 /sdcard/holomorphic-wanderers.mp4
+# Continuous runtime only. No input is injected while recording.
+adb shell screenrecord --size 960x540 --bit-rate 8000000 --time-limit 22 /sdcard/holomorphic-wanderers.mp4
 adb pull /sdcard/holomorphic-wanderers.mp4 holomorphic-wanderers.mp4
 adb logcat -d > holomorphic-wanderers.log
 adb exec-out screencap -p > holomorphic-wanderers-end.png
@@ -184,4 +200,4 @@ steps=$(sed -n 's/.*holomorphic field: workers=3 steps=\([0-9][0-9]*\).*/\1/p' h
 test -n "$steps"
 test "$steps" -gt 0
 
-printf 'captured %sx%s smooth runtime video; holomorphic steps=%s\n' "$width" "$height" "$steps"
+printf 'captured %sx%s clean presentation runtime; holomorphic steps=%s\n' "$width" "$height" "$steps"
