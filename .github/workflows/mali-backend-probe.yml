@@ -12,8 +12,8 @@ permissions:
 env:
   IDRIS2_VERSION: 0.8.0
   COMPLEX_FOLLOWER_SHA: 4360f29d3bbdc09b4cc513e4a6be647f290ffede
-  GENERIC_BACKEND_SHA: 177214918d73b0dd0413ac66add6e930b88c3cb1
-  MALI_BACKEND_SHA: 9097161816296b700fd80eee7dc738fa51dc059f
+  GENERIC_BACKEND_SHA: 646264ceec3be0ea3d4003a649d2ed91486195b0
+  MALI_BACKEND_SHA: 91661d67d0b8a4ed15ff20da56ec1b2b648a2b4f
 
 jobs:
   compile-current-core:
@@ -171,10 +171,10 @@ jobs:
               })
 
           report = [
-              'STRUCTURED_SHADER_BACKEND_PROBE 4',
+              'STRUCTURED_SHADER_BACKEND_PROBE 5',
               'complex_follower=4360f29d3bbdc09b4cc513e4a6be647f290ffede',
-              'generic_backend=177214918d73b0dd0413ac66add6e930b88c3cb1',
-              'mali_backend=9097161816296b700fd80eee7dc738fa51dc059f',
+              'generic_backend=646264ceec3be0ea3d4003a649d2ed91486195b0',
+              'mali_backend=91661d67d0b8a4ed15ff20da56ec1b2b648a2b4f',
               '',
           ]
           for row in rows:
@@ -187,11 +187,7 @@ jobs:
               report.append(('PASS' if structured else 'FAIL') + f" {row['name']}_expensive_factor_work_gated")
               failed |= not structured
 
-          low_ok = all(
-              row['precision'] == 'lowp'
-              for row in rows
-              if row['name'].endswith('lowp')
-          )
+          low_ok = all(row['precision'] == 'lowp' for row in rows if row['name'].endswith('lowp'))
           report.append(('PASS' if low_ok else 'FAIL') + ' explicit_lowp_emission')
           failed |= not low_ok
 
