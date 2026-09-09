@@ -22,6 +22,7 @@ struct walk_state {
     bool running;
     bool stop;
     uint64_t generation;
+    float coefficient_budget;
     float coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
     struct walk_worker workers[HOLOMORPHIC_WALK_WORKER_COUNT];
 };
@@ -31,7 +32,7 @@ static struct walk_state walk = {
     .changed = PTHREAD_COND_INITIALIZER
 };
 
-/* Samples are in the normalized entire coordinate u = z / 6. */
+/* Samples are in the normalized entire coordinate used by the displayed q. */
 static const float disturbance_samples[DISTURBANCE_SAMPLE_COUNT][2] = {
     { 0.00f,  0.00f},
     { 0.18f,  0.07f},
@@ -183,7 +184,8 @@ static float outward_budget_slope(
 
 static float disturbance_score(
     const float coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2],
-    const float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2]
+    const float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2],
+    float coefficient_budget
 ) {
     float score = 0.0f;
     for (int sample = 0; sample < DISTURBANCE_SAMPLE_COUNT; ++sample) {
@@ -212,9 +214,9 @@ static float disturbance_score(
 
     float budget = holomorphic_walk_coefficient_budget(coefficients);
     float slope = outward_budget_slope(coefficients, direction);
-    if (budget > 0.52f && slope > 0.0f) {
-        float closeness = (budget - 0.52f) /
-            (HOLOMORPHIC_WALK_COEFFICIENT_BUDGET - 0.52f);
+    if (budget > 0.52f && slope > 0.0f && coefficient_budget > 0.53f) {
+        float range = coefficient_budget - 0.52f;
+        float closeness = (budget - 0.52f) / range;
         score += 0.7f * closeness * closeness * slope * slope;
     }
     return score;
@@ -222,6 +224,7 @@ static float disturbance_score(
 
 static void search_direction(
     const float coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2],
+    float coefficient_budget,
     float heading[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2],
     float best_direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2],
     float *best_score,
@@ -243,7 +246,7 @@ static void search_direction(
             continue;
         }
 
-        float score = disturbance_score(coefficients, candidate);
+        float score = disturbance_score(coefficients, candidate, coefficient_budget);
         if (score < *best_score) {
             *best_score = score;
             memcpy(best_direction, candidate, sizeof(candidate));
@@ -268,6 +271,7 @@ static void *worker_main(void *argument) {
 
     while (true) {
         float coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
+        float coefficient_budget;
         uint64_t generation;
 
         pthread_mutex_lock(&walk.mutex);
@@ -279,12 +283,20 @@ static void *worker_main(void *argument) {
             return NULL;
         }
         generation = walk.generation;
+        coefficient_budget = walk.coefficient_budget;
         memcpy(coefficients, walk.coefficients, sizeof(coefficients));
         pthread_mutex_unlock(&walk.mutex);
 
         float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
         float score;
-        search_direction(coefficients, heading, direction, &score, &random_state);
+        search_direction(
+            coefficients,
+            coefficient_budget,
+            heading,
+            direction,
+            &score,
+            &random_state
+        );
 
         pthread_mutex_lock(&walk.mutex);
         if (!walk.stop && generation >= worker->result_generation && isfinite(score)) {
@@ -297,7 +309,11 @@ static void *worker_main(void *argument) {
     }
 }
 
-bool holomorphic_walk_start(void) {
+bool holomorphic_walk_start(float coefficient_budget) {
+    if (!isfinite(coefficient_budget) || coefficient_budget <= 0.53f) {
+        return false;
+    }
+
     pthread_mutex_lock(&walk.mutex);
     if (walk.running) {
         pthread_mutex_unlock(&walk.mutex);
@@ -305,6 +321,7 @@ bool holomorphic_walk_start(void) {
     }
     walk.stop = false;
     walk.generation = 0;
+    walk.coefficient_budget = coefficient_budget;
     memset(walk.coefficients, 0, sizeof(walk.coefficients));
     for (int index = 0; index < HOLOMORPHIC_WALK_WORKER_COUNT; ++index) {
         walk.workers[index].index = index;
