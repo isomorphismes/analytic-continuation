@@ -30,7 +30,12 @@ val uploadSigningConfigured = listOf(
 // legacy file/alias names are retained solely so current debug builds can
 // replace older development installs in place; they do not describe a mode.
 val sideloadKeystoreSource = file("debug/lasso-dev.p12.b64")
-val sideloadKeystoreFile = layout.buildDirectory.file("sideload-signing/lasso-dev.p12").get().asFile
+// Keep the decoded key outside app/build: a combined `clean assembleDebug`
+// deletes app/build after configuration and would otherwise erase the key
+// before AGP validates the debug signing configuration.
+val sideloadKeystoreFile = file(
+    "${System.getProperty("java.io.tmpdir")}/analytic-continuation-lasso-dev.p12"
+)
 val sideloadSigningAvailable = sideloadKeystoreSource.isFile
 if (sideloadSigningAvailable && !sideloadKeystoreFile.exists()) {
     sideloadKeystoreFile.parentFile.mkdirs()
