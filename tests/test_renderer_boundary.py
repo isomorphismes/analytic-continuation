@@ -25,6 +25,7 @@ class RendererBoundaryTests(unittest.TestCase):
         self.assertNotIn("test_factor_state.c", workflows)
         self.assertNotIn("test_factor_snap.c", workflows)
         self.assertNotIn("test_gesture_state.c", workflows)
+        self.assertNotIn("test_holomorphic_walk.c", workflows)
 
     def test_dead_wegert_interface_copies_are_absent(self) -> None:
         cpp = ROOT / "android" / "app" / "src" / "main" / "cpp"
@@ -34,9 +35,62 @@ class RendererBoundaryTests(unittest.TestCase):
             "factor_state.h",
             "gesture_state.h",
             "polynomial_overlay.h",
+            "holomorphic_walk.c",
+            "holomorphic_walk.h",
         ):
             with self.subTest(name=name):
                 self.assertFalse((cpp / name).exists())
+
+    def test_cauchy_field_is_gpu_driven(self) -> None:
+        cpp = (
+            ROOT
+            / "android"
+            / "app"
+            / "src"
+            / "main"
+            / "cpp"
+            / "analytic_continuation_random.c"
+        ).read_text()
+        shader = (
+            ROOT
+            / "android"
+            / "app"
+            / "src"
+            / "main"
+            / "assets"
+            / "continuation.frag.in"
+        ).read_text()
+        cmake = (
+            ROOT / "android" / "app" / "src" / "main" / "cpp" / "CMakeLists.txt"
+        ).read_text()
+
+        self.assertIn('glGetUniformLocation(engine->program, "u_time")', cpp)
+        self.assertIn("glUniform1f(engine->time_location, animation_time)", cpp)
+        self.assertNotIn("holomorphic_walk", cpp)
+        self.assertNotIn("holomorphic_walk", cmake)
+        self.assertNotIn("u_holomorphic_coefficients", shader)
+
+        self.assertIn("#define SOURCE_COUNT 24", shader)
+        self.assertIn("uniform float u_time;", shader)
+        self.assertIn("vec2 source_position", shader)
+        self.assertIn("vec2 source_weight", shader)
+        self.assertIn("vec2 holomorphic_field", shader)
+        self.assertIn("1.8 * view_radius", shader)
+        self.assertIn("0.35 * view_radius", shader)
+        self.assertGreater(1.8 - 0.35, 1.0)
+
+    def test_zoom_range_is_not_artificially_tight(self) -> None:
+        cpp = (
+            ROOT
+            / "android"
+            / "app"
+            / "src"
+            / "main"
+            / "cpp"
+            / "analytic_continuation_random.c"
+        ).read_text()
+        self.assertIn("if (zoom < 0.1f) zoom = 0.1f;", cpp)
+        self.assertIn("if (zoom > 32.0f) zoom = 32.0f;", cpp)
 
     def test_android_launches_only_the_native_explorer(self) -> None:
         manifest = (
