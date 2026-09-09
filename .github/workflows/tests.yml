@@ -34,6 +34,18 @@ jobs:
             -pthread -lm \
             -o /tmp/test-holomorphic-walk
           /tmp/test-holomorphic-walk
+      - name: Test scene, scenario, presentation, and motion boundaries
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Iandroid/app/src/main/cpp \
+            tests/test_scene_motion.c \
+            android/app/src/main/cpp/scene.c \
+            android/app/src/main/cpp/motion.c \
+            android/app/src/main/cpp/presentation.c \
+            android/app/src/main/cpp/scenario.c \
+            -lm \
+            -o /tmp/test-scene-motion
+          /tmp/test-scene-motion
       - name: Reject migrated Lacunary machinery in the live app
         run: |
           test ! -e android/app/src/main/cpp/analytic_continuation.c
