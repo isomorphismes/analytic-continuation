@@ -107,12 +107,14 @@ class ComplexProjectiveConsumerTest(unittest.TestCase):
         ).strip()
         shared_sha = os.environ.get("IDRIC_COMPLEX_SEMANTICS_SHA", "unresolved")
         RECEIPT.write_text(
-            "ANALYTIC_CONTINUATION_COMPLEX_CONSUMER\t1\n"
+            "COMPLEX_PROJECTIVE_RECEIPT\t1\n"
+            "role\tAPPLICATION_CONSUMER\n"
             "repository\tisomorphismes/analytic-continuation\n"
             f"source_head_sha\t{source_sha}\n"
             f"tested_checkout_sha\t{tested_sha}\n"
             f"canonical_complex_projective_semantics_sha\t{shared_sha}\n"
             f"consumer_fixture_sha256\t{hashlib.sha256(cls.fixture_bytes).hexdigest()}\n"
+            "stage\tshared_semantic_contract\tPASS\n"
             "stage\tshared_divisor_and_field_contract\tPASS\n"
             "stage\tentire_polynomial_q_contract\tPASS\n"
             "stage\texp_q_nonzero_samples\tPASS\n"
