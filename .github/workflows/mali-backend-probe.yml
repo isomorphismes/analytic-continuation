@@ -1,4 +1,4 @@
-name: Mali backend probe
+name: Structured shader backend probe
 
 on:
   push:
@@ -11,8 +11,9 @@ permissions:
 
 env:
   IDRIS2_VERSION: 0.8.0
-  GENERIC_BACKEND_SHA: 4360f29d3bbdc09b4cc513e4a6be647f290ffede
-  MALI_BACKEND_SHA: a855d89ab0f25025d825afdc194f492e4c00ecff
+  COMPLEX_FOLLOWER_SHA: 4360f29d3bbdc09b4cc513e4a6be647f290ffede
+  GENERIC_BACKEND_SHA: 941aefb980837d85464035c2614b861d55ce1579
+  MALI_BACKEND_SHA: 14860ebf82b14980f38570c16500fb546b960fc6
 
 jobs:
   compile-current-core:
@@ -22,7 +23,15 @@ jobs:
       - name: Check out Analytic Continuation
         uses: actions/checkout@v4
 
-      - name: Check out generic complex follower backend
+      - name: Check out complex arithmetic follower
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/idris-shader-backend
+          ref: ${{ env.COMPLEX_FOLLOWER_SHA }}
+          path: .complex-follower
+          persist-credentials: false
+
+      - name: Check out generic structured backend
         uses: actions/checkout@v4
         with:
           repository: isomorphisms/idris-shader-backend
@@ -38,9 +47,11 @@ jobs:
           path: .mali-backend
           persist-credentials: false
 
-      - name: Overlay only the complex arithmetic follower onto the Mali branch
+      - name: Overlay only the complex arithmetic follower
         run: |
-          cp .generic-backend/src/Shader/ComplexProjectiveFollower.idr \
+          cp .complex-follower/src/Shader/ComplexProjectiveFollower.idr \
+            .generic-backend/src/Shader/ComplexProjectiveFollower.idr
+          cp .complex-follower/src/Shader/ComplexProjectiveFollower.idr \
             .mali-backend/src/Shader/ComplexProjectiveFollower.idr
 
       - name: Install compiler and GLSL validator dependencies
@@ -76,9 +87,14 @@ jobs:
           make -C .generic-backend backend
           make -C .mali-backend backend
 
-      - name: Compile the same live typed core three ways
+      - name: Compile the same live typed core four ways
         run: |
-          mkdir -p build/mali-probe/generic build/mali-probe/mali-highp build/mali-probe/mali-mediump
+          mkdir -p \
+            build/structured-probe/generic-highp \
+            build/structured-probe/generic-lowp \
+            build/structured-probe/mali-highp \
+            build/structured-probe/mali-lowp
+
           cp gpu/Example/AnalyticContinuationHandwrittenCore.idr \
             .generic-backend/src/Example/AnalyticContinuationHandwrittenCore.idr
           cp gpu/Example/AnalyticContinuationHandwrittenCore.idr \
@@ -86,91 +102,116 @@ jobs:
 
           .generic-backend/build/exec/idris2-glsles \
             --cg glsles \
-            --directive dump-ir="$GITHUB_WORKSPACE/build/mali-probe/generic/core.ir" \
+            --directive dump-ir="$GITHUB_WORKSPACE/build/structured-probe/generic-highp/core.ir" \
+            --directive float-precision=highp \
             --source-dir .generic-backend/src \
-            --output-dir "$GITHUB_WORKSPACE/build/mali-probe/generic" \
+            --output-dir "$GITHUB_WORKSPACE/build/structured-probe/generic-highp" \
+            .generic-backend/src/Example/AnalyticContinuationHandwrittenCore.idr \
+            -o core
+
+          .generic-backend/build/exec/idris2-glsles \
+            --cg glsles \
+            --directive dump-ir="$GITHUB_WORKSPACE/build/structured-probe/generic-lowp/core.ir" \
+            --directive float-precision=lowp \
+            --source-dir .generic-backend/src \
+            --output-dir "$GITHUB_WORKSPACE/build/structured-probe/generic-lowp" \
             .generic-backend/src/Example/AnalyticContinuationHandwrittenCore.idr \
             -o core
 
           .mali-backend/build/exec/idris2-glsles \
             --cg glsles \
-            --directive dump-ir="$GITHUB_WORKSPACE/build/mali-probe/mali-highp/core.ir" \
+            --directive dump-ir="$GITHUB_WORKSPACE/build/structured-probe/mali-highp/core.ir" \
             --directive float-precision=highp \
             --source-dir .mali-backend/src \
-            --output-dir "$GITHUB_WORKSPACE/build/mali-probe/mali-highp" \
+            --output-dir "$GITHUB_WORKSPACE/build/structured-probe/mali-highp" \
             .mali-backend/src/Example/AnalyticContinuationHandwrittenCore.idr \
             -o core
 
           .mali-backend/build/exec/idris2-glsles \
             --cg glsles \
-            --directive dump-ir="$GITHUB_WORKSPACE/build/mali-probe/mali-mediump/core.ir" \
-            --directive float-precision=mediump \
+            --directive dump-ir="$GITHUB_WORKSPACE/build/structured-probe/mali-lowp/core.ir" \
+            --directive float-precision=lowp \
             --source-dir .mali-backend/src \
-            --output-dir "$GITHUB_WORKSPACE/build/mali-probe/mali-mediump" \
+            --output-dir "$GITHUB_WORKSPACE/build/structured-probe/mali-lowp" \
             .mali-backend/src/Example/AnalyticContinuationHandwrittenCore.idr \
             -o core
 
-      - name: Validate and measure emitted shaders
+      - name: Validate and inspect emitted control flow
         run: |
-          glslangValidator -S frag build/mali-probe/generic/core.frag
-          glslangValidator -S frag build/mali-probe/mali-highp/core.frag
-          glslangValidator -S frag build/mali-probe/mali-mediump/core.frag
+          for shader in build/structured-probe/*/core.frag; do
+            glslangValidator -S frag "$shader"
+          done
 
           python3 - <<'PY'
           from pathlib import Path
 
-          root = Path('build/mali-probe')
-          names = ['generic', 'mali-highp', 'mali-mediump']
+          root = Path('build/structured-probe')
+          names = ['generic-highp', 'generic-lowp', 'mali-highp', 'mali-lowp']
           rows = []
           for name in names:
               shader = (root / name / 'core.frag').read_text()
               ir = (root / name / 'core.ir').read_text()
+              lines = shader.splitlines()
               rows.append({
                   'name': name,
-                  'precision': 'mediump' if 'precision mediump float;' in shader else 'highp',
+                  'precision': (
+                      'lowp' if 'precision lowp float;' in shader
+                      else 'mediump' if 'precision mediump float;' in shader
+                      else 'highp'
+                  ),
                   'shader_bytes': len(shader.encode()),
-                  'shader_lines': len(shader.splitlines()),
+                  'shader_lines': len(lines),
                   'ir_lines': len(ir.splitlines()),
                   'atan': shader.count('atan('),
                   'log': shader.count('log('),
                   'real_if': shader.count('  if ('),
                   'ternary': shader.count(' ? '),
-                  'temporary_mentions': shader.count('_idris_t'),
+                  'gated_atan': sum('atan(' in line and line.startswith('    ') for line in lines),
+                  'gated_log': sum('log(' in line and line.startswith('    ') for line in lines),
               })
 
           report = [
-              'MALI_BACKEND_PROBE 1',
-              'generic_backend=4360f29d3bbdc09b4cc513e4a6be647f290ffede',
-              'mali_backend=a855d89ab0f25025d825afdc194f492e4c00ecff',
+              'STRUCTURED_SHADER_BACKEND_PROBE 2',
+              'complex_follower=4360f29d3bbdc09b4cc513e4a6be647f290ffede',
+              'generic_backend=941aefb980837d85464035c2614b861d55ce1579',
+              'mali_backend=14860ebf82b14980f38570c16500fb546b960fc6',
               '',
           ]
           for row in rows:
               report.append(' '.join(f'{key}={value}' for key, value in row.items()))
 
-          generic, highp, medium = rows
-          report += ['', 'interpretation:']
-          if highp['real_if'] > generic['real_if']:
-              report.append('PASS structured_branching_reached_current_core')
-          else:
-              report.append('FAIL structured_branching_reached_current_core')
-          if highp['atan'] < generic['atan'] or highp['log'] < generic['log']:
-              report.append('PASS static_expensive_op_count_reduced')
-          else:
-              report.append('FAIL static_expensive_op_count_reduced')
-          if medium['precision'] == 'mediump':
-              report.append('PASS explicit_mediump_emission')
-          else:
-              report.append('FAIL explicit_mediump_emission')
+          report += ['', 'acceptance:']
+          failed = False
+          for row in rows:
+              structured = row['real_if'] > 0 and row['gated_atan'] == row['atan'] and row['gated_log'] == row['log']
+              report.append(('PASS' if structured else 'FAIL') + f" {row['name']}_expensive_factor_work_gated")
+              failed |= not structured
+
+          low_ok = all(
+              row['precision'] == 'lowp'
+              for row in rows
+              if row['name'].endswith('lowp')
+          )
+          report.append(('PASS' if low_ok else 'FAIL') + ' explicit_lowp_emission')
+          failed |= not low_ok
+
+          generic_structure = rows[0]['real_if'] == rows[1]['real_if']
+          mali_structure = rows[2]['real_if'] == rows[3]['real_if']
+          report.append(('PASS' if generic_structure else 'FAIL') + ' generic_structure_independent_of_precision')
+          report.append(('PASS' if mali_structure else 'FAIL') + ' mali_structure_independent_of_precision')
+          failed |= not generic_structure or not mali_structure
 
           text = '\n'.join(report) + '\n'
           (root / 'report.txt').write_text(text)
           print(text, end='')
+          if failed:
+              raise SystemExit(1)
           PY
 
-      - name: Retain Mali probe output
+      - name: Retain structured backend probe output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mali-backend-probe
-          path: build/mali-probe
+          name: structured-shader-backend-probe
+          path: build/structured-probe
           if-no-files-found: error
