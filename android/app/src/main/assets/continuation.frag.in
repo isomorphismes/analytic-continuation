@@ -53,14 +53,14 @@ vec2 remote_pole_direction(int index) {
 }
 
 float remote_pole_radius_scale(int index) {
-    if (index == 0) return 2.55;
-    if (index == 1) return 2.85;
-    if (index == 2) return 3.10;
-    if (index == 3) return 2.70;
-    if (index == 4) return 3.25;
-    if (index == 5) return 2.95;
-    if (index == 6) return 2.65;
-    return 3.35;
+    if (index == 0) return 2.30;
+    if (index == 1) return 2.55;
+    if (index == 2) return 2.80;
+    if (index == 3) return 2.40;
+    if (index == 4) return 2.95;
+    if (index == 5) return 2.65;
+    if (index == 6) return 2.35;
+    return 3.05;
 }
 
 vec2 remote_pole_motion(int index) {
@@ -83,7 +83,7 @@ vec2 remote_pole_motion(int index) {
 
 vec2 remote_pole_position(int index, float view_outer_radius) {
     vec2 base = remote_pole_radius_scale(index) * remote_pole_direction(index);
-    vec2 wander = 0.85 * remote_pole_motion(index);
+    vec2 wander = 1.15 * remote_pole_motion(index);
     return view_outer_radius * (base + wander);
 }
 
