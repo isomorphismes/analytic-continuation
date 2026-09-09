@@ -3,7 +3,7 @@
 The Android explorer separates five concerns that used to be mixed in the `NativeActivity` engine:
 
 - `scene`: the mathematical divisor and camera zoom;
-- `field_evolution`: the continuously changing nonvanishing holomorphic factor;
+- `field_evolution`: the continuously changing background field;
 - `motion`: continuous trajectories for visible zeros and poles;
 - `presentation`: marker geometry, controls, and whether touch interaction is enabled;
 - `scenario`: data that composes the other four for one run.
@@ -19,18 +19,23 @@ A minimal normal configuration is:
 ```text
 name=interactive
 presentation=interactive
-motion=none
+field=entire
 field_speed=0.30
+field_budget=1.20
+motion=none
 ```
 
-A clean moving presentation can instead describe the initial divisor and motion explicitly:
+A stronger clean moving presentation can instead select the wandering off-screen-pole field and describe the initial divisor and motion explicitly:
 
 ```text
 name=two-pair-wander
 presentation=clean
 marker_radius=5.0
 marker_stroke=1.8
+
+field=wandering_offscreen_poles
 field_speed=0.42
+field_budget=6.0
 
 motion=wander
 seed=7319
@@ -57,7 +62,9 @@ Supported keys are:
 - `show_controls=true|false`;
 - `interaction=true|false`;
 - `marker_radius`, `marker_stroke`: marker geometry in pixels;
-- `field_speed`: speed of the current holomorphic-walk field evolution;
+- `field=entire|wandering_offscreen_poles`;
+- `field_speed`: speed of the `exp(q)` holomorphic walk;
+- `field_budget`: coefficient budget used both by the direction search and by the applied `exp(q)` evolution;
 - `motion=none|wander`;
 - `seed`: deterministic wander seed;
 - `wander_speed`: continuous non-lockstep drift speed;
@@ -74,8 +81,20 @@ The objects retain their types throughout: a pole remains a pole and a zero/hole
 
 The motion module advances persistent state with bounded time steps. Capture scripts should not replace this with ADB swipes, frame interpolation, cross-fades, or independently generated positions.
 
-## Field boundary
+## Field modes
 
-`field_evolution` currently wraps the existing three-worker `exp(q)` holomorphic walk. Its state and cadence are independent of divisor motion. Future field implementations—such as stronger off-screen-pole/Cauchy-field experiments—should fit behind the same boundary rather than becoming special cases in the Android interaction loop.
+`field=entire` is the ordinary whole-plane perturbation
 
-That separation is intentional: a video can choose a stronger soup implementation while independently choosing which visible factors wander, when pairs exchange, and how the presentation is drawn.
+```text
+R(z) exp(q(z))
+```
+
+with the existing three-worker direction search driving the coefficients of `q`. This mode is entire and nonzero apart from the visible rational divisor `R`.
+
+`field=wandering_offscreen_poles` adds the twenty-four procedural remote poles from the stronger lava-lamp experiment. They stay outside the circumscribed visible region and wander continuously there while the `exp(q)` field continues to evolve. Their contribution is therefore holomorphic and nonzero on the visible region, but unlike `exp(q)` it is not entire on the whole complex plane. The distinction is explicit in the scenario rather than hidden in a special-purpose APK path.
+
+The field state and cadence are independent of visible-divisor motion. A video can therefore choose the stronger off-screen-pole soup while separately deciding which visible factors wander, when pairs exchange, and how large the markers are.
+
+## Runtime acceptance
+
+`scenarios/video-demo.conf` is a clean scenario used by CI to exercise the same path intended for presentation videos: smaller markers, no placement controls, the stronger off-screen-pole field, background evolution, random non-lockstep wander, and two scheduled half-circle exchanges. CI builds this by replacing only `scenario.conf` before the APK build; it does not rewrite the native engine or shader.
