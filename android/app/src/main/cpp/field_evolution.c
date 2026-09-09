@@ -56,20 +56,26 @@ bool field_evolution_advance(
     double now,
     bool allow_motion
 ) {
-    float dt = (float)(now - field->last_time);
+    float wall_dt = (float)(now - field->last_time);
     field->last_time = now;
-    if (dt <= 0.0f) return false;
-    if (dt > 0.05f) dt = 0.05f;
+    if (wall_dt <= 0.0f) return false;
 
     publish_if_due(field, now);
     if (!allow_motion) return false;
 
+    /*
+     * Remote poles are analytic trajectories parameterized by real runtime time,
+     * so a slow rendered frame skips samples rather than slowing the orbit. The
+     * coefficient walk is an integrated numerical process and keeps its bounded
+     * per-update step to prevent a delayed frame from causing a large q jump.
+     */
     bool changed = false;
     if (field->background_mode == FIELD_BACKGROUND_WANDERING_OFFSCREEN_POLES) {
-        field->remote_pole_time += dt;
+        field->remote_pole_time += wall_dt;
         changed = true;
     }
 
+    float dt = wall_dt > 0.05f ? 0.05f : wall_dt;
     float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
     float score = field->last_score;
     if (
