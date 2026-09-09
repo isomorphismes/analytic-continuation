@@ -1,0 +1,176 @@
+name: Mali backend probe
+
+on:
+  push:
+    branches:
+      - properly-typed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IDRIS2_VERSION: 0.8.0
+  GENERIC_BACKEND_SHA: 4360f29d3bbdc09b4cc513e4a6be647f290ffede
+  MALI_BACKEND_SHA: a855d89ab0f25025d825afdc194f492e4c00ecff
+
+jobs:
+  compile-current-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out Analytic Continuation
+        uses: actions/checkout@v4
+
+      - name: Check out generic complex follower backend
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/idris-shader-backend
+          ref: ${{ env.GENERIC_BACKEND_SHA }}
+          path: .generic-backend
+          persist-credentials: false
+
+      - name: Check out Mali-G57 optimization backend
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/idris-shader-backend
+          ref: ${{ env.MALI_BACKEND_SHA }}
+          path: .mali-backend
+          persist-credentials: false
+
+      - name: Overlay only the complex arithmetic follower onto the Mali branch
+        run: |
+          cp .generic-backend/src/Shader/ComplexProjectiveFollower.idr \
+            .mali-backend/src/Shader/ComplexProjectiveFollower.idr
+
+      - name: Install compiler and GLSL validator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chezscheme glslang-tools libgmp-dev
+
+      - name: Restore Idris 2 compiler and API
+        id: idris-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.idris2
+          key: properly-typed-idris2-${{ runner.os }}-${{ runner.arch }}-${{ env.IDRIS2_VERSION }}-api-v1
+
+      - name: Build Idris 2 if cache is empty
+        if: steps.idris-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "v${IDRIS2_VERSION}" \
+            https://github.com/idris-lang/Idris2.git /tmp/Idris2
+          make -C /tmp/Idris2 bootstrap SCHEME=chezscheme
+          make -C /tmp/Idris2 install
+          export PATH="$HOME/.idris2/bin:$PATH"
+          make -C /tmp/Idris2 clean
+          make -C /tmp/Idris2 all
+          make -C /tmp/Idris2 install
+          make -C /tmp/Idris2 install-api
+
+      - name: Put Idris 2 on PATH
+        run: echo "$HOME/.idris2/bin" >> "$GITHUB_PATH"
+
+      - name: Build both shader compilers
+        run: |
+          make -C .generic-backend backend
+          make -C .mali-backend backend
+
+      - name: Compile the same live typed core three ways
+        run: |
+          mkdir -p build/mali-probe/generic build/mali-probe/mali-highp build/mali-probe/mali-mediump
+          cp gpu/Example/AnalyticContinuationHandwrittenCore.idr \
+            .generic-backend/src/Example/AnalyticContinuationHandwrittenCore.idr
+          cp gpu/Example/AnalyticContinuationHandwrittenCore.idr \
+            .mali-backend/src/Example/AnalyticContinuationHandwrittenCore.idr
+
+          .generic-backend/build/exec/idris2-glsles \
+            --cg glsles \
+            --directive dump-ir="$GITHUB_WORKSPACE/build/mali-probe/generic/core.ir" \
+            --source-dir .generic-backend/src \
+            --output-dir "$GITHUB_WORKSPACE/build/mali-probe/generic" \
+            .generic-backend/src/Example/AnalyticContinuationHandwrittenCore.idr \
+            -o core
+
+          .mali-backend/build/exec/idris2-glsles \
+            --cg glsles \
+            --directive dump-ir="$GITHUB_WORKSPACE/build/mali-probe/mali-highp/core.ir" \
+            --directive float-precision=highp \
+            --source-dir .mali-backend/src \
+            --output-dir "$GITHUB_WORKSPACE/build/mali-probe/mali-highp" \
+            .mali-backend/src/Example/AnalyticContinuationHandwrittenCore.idr \
+            -o core
+
+          .mali-backend/build/exec/idris2-glsles \
+            --cg glsles \
+            --directive dump-ir="$GITHUB_WORKSPACE/build/mali-probe/mali-mediump/core.ir" \
+            --directive float-precision=mediump \
+            --source-dir .mali-backend/src \
+            --output-dir "$GITHUB_WORKSPACE/build/mali-probe/mali-mediump" \
+            .mali-backend/src/Example/AnalyticContinuationHandwrittenCore.idr \
+            -o core
+
+      - name: Validate and measure emitted shaders
+        run: |
+          glslangValidator -S frag build/mali-probe/generic/core.frag
+          glslangValidator -S frag build/mali-probe/mali-highp/core.frag
+          glslangValidator -S frag build/mali-probe/mali-mediump/core.frag
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('build/mali-probe')
+          names = ['generic', 'mali-highp', 'mali-mediump']
+          rows = []
+          for name in names:
+              shader = (root / name / 'core.frag').read_text()
+              ir = (root / name / 'core.ir').read_text()
+              rows.append({
+                  'name': name,
+                  'precision': 'mediump' if 'precision mediump float;' in shader else 'highp',
+                  'shader_bytes': len(shader.encode()),
+                  'shader_lines': len(shader.splitlines()),
+                  'ir_lines': len(ir.splitlines()),
+                  'atan': shader.count('atan('),
+                  'log': shader.count('log('),
+                  'real_if': shader.count('  if ('),
+                  'ternary': shader.count(' ? '),
+                  'temporary_mentions': shader.count('_idris_t'),
+              })
+
+          report = [
+              'MALI_BACKEND_PROBE 1',
+              'generic_backend=4360f29d3bbdc09b4cc513e4a6be647f290ffede',
+              'mali_backend=a855d89ab0f25025d825afdc194f492e4c00ecff',
+              '',
+          ]
+          for row in rows:
+              report.append(' '.join(f'{key}={value}' for key, value in row.items()))
+
+          generic, highp, medium = rows
+          report += ['', 'interpretation:']
+          if highp['real_if'] > generic['real_if']:
+              report.append('PASS structured_branching_reached_current_core')
+          else:
+              report.append('FAIL structured_branching_reached_current_core')
+          if highp['atan'] < generic['atan'] or highp['log'] < generic['log']:
+              report.append('PASS static_expensive_op_count_reduced')
+          else:
+              report.append('FAIL static_expensive_op_count_reduced')
+          if medium['precision'] == 'mediump':
+              report.append('PASS explicit_mediump_emission')
+          else:
+              report.append('FAIL explicit_mediump_emission')
+
+          text = '\n'.join(report) + '\n'
+          (root / 'report.txt').write_text(text)
+          print(text, end='')
+          PY
+
+      - name: Retain Mali probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mali-backend-probe
+          path: build/mali-probe
+          if-no-files-found: error
