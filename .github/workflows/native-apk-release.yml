@@ -121,8 +121,8 @@ jobs:
         with:
           name: analytic-continuation-${{ env.RELEASE_VERSION }}-apk
           path: |
-            analytic-continuation-${RELEASE_VERSION}.apk
-            analytic-continuation-${RELEASE_VERSION}.apk.sha256
+            analytic-continuation-${{ env.RELEASE_VERSION }}.apk
+            analytic-continuation-${{ env.RELEASE_VERSION }}.apk.sha256
           if-no-files-found: error
 
   emulate:
