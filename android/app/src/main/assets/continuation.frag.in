@@ -18,6 +18,9 @@ uniform vec2 u_pole_positions[MAX_FACTORS];
 uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];
 uniform float u_zoom;
 uniform int u_placement_kind;
+uniform int u_show_controls;
+uniform float u_marker_radius;
+uniform float u_marker_stroke;
 
 vec2 complex_multiply(vec2 left, vec2 right) {
     return vec2(
@@ -92,75 +95,89 @@ void main() {
 
     vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);
 
-    // Everything below is interaction overlay, not the value -> Wegert color oracle.
+    // Marker geometry is presentation state, not mathematical state. The default
+    // interactive values reproduce the previous 9 px zero and 7 px pole marks.
+    float marker_radius = max(u_marker_radius, 1.5);
+    float marker_stroke = clamp(u_marker_stroke, 0.75, marker_radius - 0.5);
+    float zero_inner = marker_radius - marker_stroke;
+
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_zero_count) break;
         vec2 center = 0.5 * u_resolution + u_zero_positions[index] * pixel_radius;
-        float mark = ring_mask(gl_FragCoord.xy, center, 9.0, 5.0);
+        float mark = ring_mask(gl_FragCoord.xy, center, marker_radius, zero_inner);
         color = mix(color, vec3(0.04), mark);
-        float highlight = ring_mask(gl_FragCoord.xy, center, 6.8, 5.5);
+        float highlight = ring_mask(
+            gl_FragCoord.xy,
+            center,
+            zero_inner + 0.45 * marker_stroke,
+            zero_inner + 0.125 * marker_stroke
+        );
         color = mix(color, vec3(0.98), highlight);
     }
 
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_pole_count) break;
         vec2 center = 0.5 * u_resolution + u_pole_positions[index] * pixel_radius;
+        float reach = (7.0 / 9.0) * marker_radius;
+        float pole_half_width = 0.60 * marker_stroke;
         float pole_mark = max(
             line_mask(
                 gl_FragCoord.xy,
-                center + vec2(-7.0, -7.0),
-                center + vec2(7.0, 7.0),
-                2.4
+                center + vec2(-reach, -reach),
+                center + vec2(reach, reach),
+                pole_half_width
             ),
             line_mask(
                 gl_FragCoord.xy,
-                center + vec2(-7.0, 7.0),
-                center + vec2(7.0, -7.0),
-                2.4
+                center + vec2(-reach, reach),
+                center + vec2(reach, -reach),
+                pole_half_width
             )
         );
         color = mix(color, vec3(0.04), pole_mark);
     }
 
-    float placement_radius = clamp(0.048 * min(u_resolution.x, u_resolution.y), 26.0, 38.0);
-    vec2 zero_center = vec2(placement_radius + 16.0, placement_radius + 16.0);
-    vec2 pole_center = vec2(
-        zero_center.x + 2.0 * placement_radius + 14.0,
-        zero_center.y
-    );
+    if (u_show_controls != 0) {
+        float placement_radius = clamp(0.048 * min(u_resolution.x, u_resolution.y), 26.0, 38.0);
+        vec2 zero_center = vec2(placement_radius + 16.0, placement_radius + 16.0);
+        vec2 pole_center = vec2(
+            zero_center.x + 2.0 * placement_radius + 14.0,
+            zero_center.y
+        );
 
-    bool zero_selected = u_placement_kind == 0;
-    bool pole_selected = u_placement_kind == 1;
+        bool zero_selected = u_placement_kind == 0;
+        bool pole_selected = u_placement_kind == 1;
 
-    float zero_disk = circle_mask(gl_FragCoord.xy, zero_center, placement_radius);
-    color = mix(color, zero_selected ? vec3(0.94) : vec3(0.04), zero_disk * 0.86);
-    vec3 zero_mark_color = zero_selected ? vec3(0.05) : vec3(0.96);
-    float zero_mark = ring_mask(
-        gl_FragCoord.xy,
-        zero_center,
-        placement_radius * 0.40,
-        placement_radius * 0.25
-    );
-    color = mix(color, zero_mark_color, zero_mark);
-
-    float pole_disk = circle_mask(gl_FragCoord.xy, pole_center, placement_radius);
-    color = mix(color, pole_selected ? vec3(0.94) : vec3(0.04), pole_disk * 0.86);
-    vec3 pole_mark_color = pole_selected ? vec3(0.05) : vec3(0.96);
-    float pole_mark = max(
-        line_mask(
+        float zero_disk = circle_mask(gl_FragCoord.xy, zero_center, placement_radius);
+        color = mix(color, zero_selected ? vec3(0.94) : vec3(0.04), zero_disk * 0.86);
+        vec3 zero_mark_color = zero_selected ? vec3(0.05) : vec3(0.96);
+        float zero_mark = ring_mask(
             gl_FragCoord.xy,
-            pole_center + vec2(-9.0, -9.0),
-            pole_center + vec2(9.0, 9.0),
-            2.2
-        ),
-        line_mask(
-            gl_FragCoord.xy,
-            pole_center + vec2(-9.0, 9.0),
-            pole_center + vec2(9.0, -9.0),
-            2.2
-        )
-    );
-    color = mix(color, pole_mark_color, pole_mark);
+            zero_center,
+            placement_radius * 0.40,
+            placement_radius * 0.25
+        );
+        color = mix(color, zero_mark_color, zero_mark);
+
+        float pole_disk = circle_mask(gl_FragCoord.xy, pole_center, placement_radius);
+        color = mix(color, pole_selected ? vec3(0.94) : vec3(0.04), pole_disk * 0.86);
+        vec3 pole_mark_color = pole_selected ? vec3(0.05) : vec3(0.96);
+        float pole_mark = max(
+            line_mask(
+                gl_FragCoord.xy,
+                pole_center + vec2(-9.0, -9.0),
+                pole_center + vec2(9.0, 9.0),
+                2.2
+            ),
+            line_mask(
+                gl_FragCoord.xy,
+                pole_center + vec2(-9.0, 9.0),
+                pole_center + vec2(9.0, -9.0),
+                2.2
+            )
+        );
+        color = mix(color, pole_mark_color, pole_mark);
+    }
 
     frag_color = vec4(color, 1.0);
 }
