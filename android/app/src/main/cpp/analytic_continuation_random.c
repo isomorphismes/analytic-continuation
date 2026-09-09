@@ -49,6 +49,8 @@ struct engine {
     GLint zero_positions_location;
     GLint pole_positions_location;
     GLint holomorphic_coefficients_location;
+    GLint remote_poles_enabled_location;
+    GLint remote_pole_time_location;
     GLint zoom_location;
     GLint placement_kind_location;
     GLint show_controls_location;
@@ -130,7 +132,13 @@ static void initialize_state(struct engine *engine) {
         LOGE("scenario.conf unavailable; using interactive defaults");
     }
 
-    field_evolution_initialize(&engine->field, engine->scenario.field_speed, now);
+    field_evolution_initialize(
+        &engine->field,
+        engine->scenario.field_background,
+        engine->scenario.field_speed,
+        engine->scenario.field_budget,
+        now
+    );
     engine->placement_kind = SCENE_FACTOR_ZERO;
     engine->motion_last_time = now;
     engine->status_last_log = 0.0;
@@ -148,7 +156,7 @@ static void initialize_state(struct engine *engine) {
     engine->dirty = true;
 
     LOGI(
-        "scenario ready: name=%s zeros=%d poles=%d motion=%d controls=%d marker=%.3g/%.3g field_speed=%.3g",
+        "scenario ready: name=%s zeros=%d poles=%d motion=%d controls=%d marker=%.3g/%.3g field=%d field_speed=%.3g field_budget=%.3g",
         engine->scenario.name,
         engine->scenario.scene.zero_count,
         engine->scenario.scene.pole_count,
@@ -156,7 +164,9 @@ static void initialize_state(struct engine *engine) {
         engine->scenario.presentation.show_controls ? 1 : 0,
         engine->scenario.presentation.marker_radius_px,
         engine->scenario.presentation.marker_stroke_px,
-        engine->scenario.field_speed
+        (int)engine->scenario.field_background,
+        engine->scenario.field_speed,
+        engine->scenario.field_budget
     );
 }
 
@@ -249,6 +259,12 @@ static bool create_renderer(struct engine *engine) {
     engine->holomorphic_coefficients_location = glGetUniformLocation(
         engine->program, "u_holomorphic_coefficients[0]"
     );
+    engine->remote_poles_enabled_location = glGetUniformLocation(
+        engine->program, "u_remote_poles_enabled"
+    );
+    engine->remote_pole_time_location = glGetUniformLocation(
+        engine->program, "u_remote_pole_time"
+    );
     engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
     engine->placement_kind_location = glGetUniformLocation(engine->program, "u_placement_kind");
     engine->show_controls_location = glGetUniformLocation(engine->program, "u_show_controls");
@@ -260,6 +276,8 @@ static bool create_renderer(struct engine *engine) {
         engine->pole_count_location < 0 || engine->zero_positions_location < 0 ||
         engine->pole_positions_location < 0 ||
         engine->holomorphic_coefficients_location < 0 ||
+        engine->remote_poles_enabled_location < 0 ||
+        engine->remote_pole_time_location < 0 ||
         engine->zoom_location < 0 || engine->placement_kind_location < 0 ||
         engine->show_controls_location < 0 || engine->marker_radius_location < 0 ||
         engine->marker_stroke_location < 0
@@ -453,6 +471,11 @@ static void draw_frame(struct engine *engine) {
         HOLOMORPHIC_WALK_COEFFICIENT_COUNT,
         &engine->field.coefficients[0][0]
     );
+    glUniform1i(
+        engine->remote_poles_enabled_location,
+        engine->field.background_mode == FIELD_BACKGROUND_WANDERING_OFFSCREEN_POLES ? 1 : 0
+    );
+    glUniform1f(engine->remote_pole_time_location, engine->field.remote_pole_time);
     glUniform1f(engine->zoom_location, scene->zoom);
     glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
     glUniform1i(engine->show_controls_location, presentation->show_controls ? 1 : 0);
@@ -617,15 +640,20 @@ static void log_runtime_state(struct engine *engine, double now) {
     if (now - engine->status_last_log < 2.0) return;
 
     LOGI(
-        "holomorphic field: workers=%d steps=%llu budget=%.4f score=%.6g zeros=%d poles=%d scenario=%s motion_t=%.3f",
+        "holomorphic field: workers=%d steps=%llu budget=%.4f/%.4f score=%.6g zeros=%d poles=%d scenario=%s field=%d remote_t=%.3f motion_t=%.3f exchanges=%d/%d",
         HOLOMORPHIC_WALK_WORKER_COUNT,
         (unsigned long long)engine->field.accepted_steps,
         holomorphic_walk_coefficient_budget(engine->field.coefficients),
+        engine->field.coefficient_budget,
         engine->field.last_score,
         engine->scenario.scene.zero_count,
         engine->scenario.scene.pole_count,
         engine->scenario.name,
-        engine->scenario.motion.elapsed_seconds
+        (int)engine->field.background_mode,
+        engine->field.remote_pole_time,
+        engine->scenario.motion.elapsed_seconds,
+        motion_program_completed_exchange_count(&engine->scenario.motion),
+        engine->scenario.motion.exchange_count
     );
     engine->status_last_log = now;
 }
@@ -864,7 +892,7 @@ void android_main(struct android_app *app) {
             HOLOMORPHIC_WALK_WORKER_COUNT
         );
     } else {
-        LOGE("holomorphic direction workers unavailable; rendering static meromorphic map");
+        LOGE("holomorphic direction workers unavailable; rendering field without exp(q) motion");
     }
 
     app->userData = &engine;
@@ -874,9 +902,11 @@ void android_main(struct android_app *app) {
     while (true) {
         int events = 0;
         struct android_poll_source *source = NULL;
+        bool remote_background =
+            engine.field.background_mode == FIELD_BACKGROUND_WANDERING_OFFSCREEN_POLES;
         bool can_animate =
             engine.display != EGL_NO_DISPLAY && engine.focused &&
-            (engine.field.workers_started || engine.scenario.motion.enabled);
+            (engine.field.workers_started || remote_background || engine.scenario.motion.enabled);
         int timeout = can_animate ? 16 : (engine.dirty ? 0 : -1);
         int ident = ALooper_pollOnce(timeout, NULL, &events, (void **)&source);
 
