@@ -251,12 +251,10 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
           script: |
             set -eux
-            package=org.isomorphisms.analyticcontinuation.lasso.dev
-            activity=org.isomorphisms.analyticcontinuation.ExplorerActivity
 
             adb install -r build/properly-typed/handwritten-core-frozen.apk
             adb logcat -c
-            adb shell am start -W -n "$package/$activity"
+            adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
             sleep 4
             adb logcat -d > build/properly-typed/handwritten-core-emulator.log
             grep -Fq 'holomorphic field renderer ready:' build/properly-typed/handwritten-core-emulator.log
@@ -264,10 +262,10 @@ jobs:
               build/properly-typed/handwritten-core-emulator.log
             adb exec-out screencap -p > build/properly-typed/handwritten-core.png
 
-            adb shell am force-stop "$package"
+            adb shell am force-stop org.isomorphisms.analyticcontinuation.lasso.dev
             adb install -r build/properly-typed/properly-typed-core-frozen.apk
             adb logcat -c
-            adb shell am start -W -n "$package/$activity"
+            adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
             sleep 4
             adb logcat -d > build/properly-typed/properly-typed-core-emulator.log
             grep -Fq 'holomorphic field renderer ready:' build/properly-typed/properly-typed-core-emulator.log
@@ -305,10 +303,10 @@ jobs:
                 raise SystemExit('compiler-generated core diverges materially from handwritten core')
             PY
 
-            adb shell am force-stop "$package"
+            adb shell am force-stop org.isomorphisms.analyticcontinuation.lasso.dev
             adb install -r build/properly-typed/properly-typed-probe.apk
             adb logcat -c
-            adb shell am start -W -n "$package/$activity"
+            adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
             sleep 4
             adb logcat -d > build/properly-typed/properly-typed-live-emulator.log
             grep -Fq 'holomorphic field renderer ready:' build/properly-typed/properly-typed-live-emulator.log
