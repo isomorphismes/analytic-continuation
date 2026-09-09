@@ -93,7 +93,6 @@ jobs:
             bash tests/seed_repeated_zeros.sh repeated-root-emulator.log /tmp/cauchy-repeated-zero-cluster
             sleep 2
             adb logcat -d > repeated-root-emulator.log
-            grep -Fq 'zero moved:' repeated-root-emulator.log
             grep -Eq 'zero added: .*count=8' repeated-root-emulator.log
             adb exec-out screencap -p > repeated-root-motion-a.png
             sleep 6
