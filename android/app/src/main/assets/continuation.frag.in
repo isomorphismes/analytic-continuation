@@ -6,7 +6,7 @@ precision highp int;
 
 #define MAX_FACTORS 32
 #define HOLOMORPHIC_COEFFICIENT_COUNT 5
-#define REMOTE_POLE_COUNT 8
+#define REMOTE_POLE_COUNT 24
 
 in vec2 v_ndc;
 out vec4 frag_color;
@@ -40,45 +40,48 @@ vec2 holomorphic_q(vec2 z) {
     return q;
 }
 
+float hash1(float x) {
+    return fract(sin(x * 127.1 + 31.7) * 43758.5453123);
+}
+
 vec2 remote_pole_direction(int index) {
-    // Golden-angle-ish placement avoids an artificial symmetric ring.
-    if (index == 0) return vec2(1.000, 0.000);
-    if (index == 1) return vec2(-0.737, 0.676);
-    if (index == 2) return vec2(0.087, -0.996);
-    if (index == 3) return vec2(0.609, 0.793);
-    if (index == 4) return vec2(-0.985, -0.174);
-    if (index == 5) return vec2(0.843, -0.537);
-    if (index == 6) return vec2(-0.259, 0.966);
-    return vec2(-0.462, -0.887);
+    float k = float(index);
+    float angle = 6.2831853 * hash1(k + 0.11);
+    return vec2(cos(angle), sin(angle));
 }
 
 float remote_pole_radius_scale(int index) {
-    if (index == 0) return 2.30;
-    if (index == 1) return 2.55;
-    if (index == 2) return 2.80;
-    if (index == 3) return 2.40;
-    if (index == 4) return 2.95;
-    if (index == 5) return 2.65;
-    if (index == 6) return 2.35;
-    return 3.05;
+    float k = float(index);
+    return mix(2.05, 3.05, hash1(k + 1.73));
 }
 
 vec2 remote_pole_motion(int index) {
-    // Re-use the already-smooth live coefficient state only as a clock/source
-    // of motion. The remote Xs themselves are genuine poles, not polynomial
-    // basis terms. Different cross-couplings make the eight poles wander along
-    // different paths even though the host still publishes only five complex
-    // coefficients.
     int first_index = index % HOLOMORPHIC_COEFFICIENT_COUNT;
     int second_index = (index * 2 + 1) % HOLOMORPHIC_COEFFICIENT_COUNT;
+    int third_index = (index * 3 + 2) % HOLOMORPHIC_COEFFICIENT_COUNT;
+
     vec2 first = u_holomorphic_coefficients[first_index];
     vec2 second = u_holomorphic_coefficients[second_index];
-    float handedness = (index % 2 == 0) ? 1.0 : -1.0;
+    vec2 third = u_holomorphic_coefficients[third_index];
+
+    float k = float(index);
+    float s1 = mix(-1.0, 1.0, hash1(k + 2.41));
+    float s2 = mix(-1.0, 1.0, hash1(k + 5.93));
+    float s3 = mix(-1.0, 1.0, hash1(k + 9.17));
+
     vec2 raw = vec2(
-        first.x + handedness * (0.73 * second.y + 0.19 * first.y),
-        first.y + handedness * (-0.61 * second.x + 0.17 * second.y)
+        first.x
+        + s1 * 0.71 * second.y
+        + s2 * 0.33 * third.x
+        + s3 * 0.19 * first.y,
+
+        first.y
+        - s1 * 0.57 * second.x
+        + s2 * 0.29 * third.y
+        - s3 * 0.23 * second.y
     );
-    return raw / (0.35 + length(raw));
+
+    return raw / (0.28 + length(raw));
 }
 
 vec2 remote_pole_position(int index, float view_outer_radius) {
