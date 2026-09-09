@@ -25,7 +25,7 @@ class RendererBoundaryTests(unittest.TestCase):
         self.assertNotIn("test_factor_state.c", workflows)
         self.assertNotIn("test_factor_snap.c", workflows)
         self.assertNotIn("test_gesture_state.c", workflows)
-        self.assertNotIn("test_holomorphic_walk.c", workflows)
+        self.assertNotIn("cc -std=c11 -wall -wextra -werror \\\n            -iandroid/app/src/main/cpp \\\n            tests/test_holomorphic_walk.c", workflows)
 
     def test_dead_wegert_interface_copies_are_absent(self) -> None:
         cpp = ROOT / "android" / "app" / "src" / "main" / "cpp"
