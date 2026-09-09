@@ -6,6 +6,7 @@ on:
       - refactor
     paths:
       - 'android/**'
+      - 'scenarios/**'
       - 'tests/test_holomorphic_walk.c'
       - 'tests/test_scene_motion.c'
       - '.github/workflows/holomorphic-apk.yml'
@@ -14,6 +15,7 @@ on:
       - main
     paths:
       - 'android/**'
+      - 'scenarios/**'
       - 'tests/test_holomorphic_walk.c'
       - 'tests/test_scene_motion.c'
       - '.github/workflows/holomorphic-apk.yml'
@@ -46,16 +48,19 @@ jobs:
       - name: Verify refactored holomorphic architecture
         run: |
           grep -Fq '#define HOLOMORPHIC_WALK_WORKER_COUNT 3' android/app/src/main/cpp/holomorphic_walk.h
-          grep -Fq '#define HOLOMORPHIC_WALK_COEFFICIENT_BUDGET 1.20f' android/app/src/main/cpp/holomorphic_walk.h
+          grep -Fq '#define HOLOMORPHIC_WALK_DEFAULT_COEFFICIENT_BUDGET 1.20f' android/app/src/main/cpp/holomorphic_walk.h
           grep -Fq '#define SEARCH_CANDIDATES 128' android/app/src/main/cpp/holomorphic_walk.c
           grep -Fq 'Re(delta_q) and Im(delta_q) are log-modulus/phase sensitivities' android/app/src/main/cpp/holomorphic_walk.c
           grep -Fq 'holomorphic_walk_best_direction' android/app/src/main/cpp/field_evolution.c
           grep -Fq 'field->speed * direction' android/app/src/main/cpp/field_evolution.c
-          grep -Fq 'HOLOMORPHIC_WALK_COEFFICIENT_BUDGET' android/app/src/main/cpp/field_evolution.c
+          grep -Fq 'field->coefficient_budget' android/app/src/main/cpp/field_evolution.c
+          grep -Fq 'FIELD_BACKGROUND_WANDERING_OFFSCREEN_POLES' android/app/src/main/cpp/field_evolution.h
           grep -Fq 'motion_program_advance' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'scenario_parse_text' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'APP_CMD_LOST_FOCUS' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'SCENE_FACTOR_POLE' android/app/src/main/cpp/scene.h
+          grep -Fq '#define REMOTE_POLE_COUNT 24' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'u_remote_poles_enabled' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'u_holomorphic_coefficients' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'u_show_controls' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'u_marker_radius' android/app/src/main/assets/continuation.frag.in
@@ -64,6 +69,8 @@ jobs:
           grep -Fq 'phase += q.y;' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'presentation=interactive' android/app/src/main/assets/scenario.conf
+          grep -Fq 'field=wandering_offscreen_poles' scenarios/video-demo.conf
+          grep -Fq 'field_budget=6.0' scenarios/video-demo.conf
           ! grep -Fq 'u_paused' android/app/src/main/assets/continuation.frag.in
           test ! -e android/app/src/main/cpp/analytic_continuation.c
           ! grep -RniE 'lasso_map|inverse_lasso|dragging_lasso|lasso_coefficients|continuation_path' android/app/src/main/cpp android/app/src/main/assets/continuation.frag.in
@@ -91,7 +98,7 @@ jobs:
             -o /tmp/test-scene-motion
           /tmp/test-scene-motion
 
-      - name: Build holomorphic-random APK
+      - name: Build normal interactive APK
         working-directory: android
         run: ./gradlew --no-daemon :app:assembleDebug
 
@@ -104,6 +111,19 @@ jobs:
         with:
           name: analytic-continuation-holomorphic-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Build clean data-driven video scenario APK
+        run: |
+          cp scenarios/video-demo.conf android/app/src/main/assets/scenario.conf
+          cd android
+          ./gradlew --no-daemon :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/video-demo-app-debug.apk"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: analytic-continuation-video-demo-apk
+          path: ${{ runner.temp }}/video-demo-app-debug.apk
           if-no-files-found: error
 
   emulate:
@@ -208,4 +228,69 @@ jobs:
             holomorphic-emulator.png
             holomorphic-motion-a.png
             holomorphic-motion-b.png
+          if-no-files-found: warn
+
+  emulate-video-demo:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: analytic-continuation-video-demo-apk
+          path: artifacts
+
+      - name: Enable KVM permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run clean off-screen-pole soup and scheduled exchanges
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: medium_phone
+          cores: 4
+          ram-size: 3072M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
+          script: |
+            adb shell wm size 270x480
+            adb shell wm density 160
+            adb install -r artifacts/video-demo-app-debug.apk
+            adb shell settings put secure immersive_mode_confirmations confirmed
+            adb logcat -c
+            adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
+            sleep 4
+            adb logcat -d > video-demo.log
+            grep -Eq 'scenario ready: name=video-demo .*motion=1 controls=0 marker=5/1.8 field=1 .*field_budget=6' video-demo.log
+            grep -Fq 'holomorphic field started with 3 workers' video-demo.log
+            grep -Fq 'zeros=4 poles=4' video-demo.log
+            adb exec-out screencap -p > video-demo-a.png
+            sleep 22
+            adb exec-out screencap -p > video-demo-b.png
+            adb logcat -d > video-demo.log
+            grep -Fq 'scenario=video-demo' video-demo.log
+            grep -Fq 'exchanges=2/2' video-demo.log
+            grep -Eq 'remote_t=[1-9][0-9]*\.|remote_t=[1-9]\.' video-demo.log
+            adb shell pidof -s org.isomorphisms.analyticcontinuation.lasso.dev | tr -d '\r' | grep -Eq '^[0-9]+$'
+            if cmp -s video-demo-a.png video-demo-b.png; then echo 'video demo did not move'; exit 1; fi
+            ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|holomorphic field shader uniforms unavailable|FATAL EXCEPTION' video-demo.log
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: analytic-continuation-video-demo-emulator-evidence
+          path: |
+            video-demo.log
+            video-demo-a.png
+            video-demo-b.png
           if-no-files-found: warn
