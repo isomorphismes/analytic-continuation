@@ -95,11 +95,13 @@ The initial source count is
 SOURCE_COUNT = 24.
 ```
 
-The initial weight amplitudes lie approximately in
+After measuring the first running APK and finding the originally suggested `0.015` through `0.08` weights visually too weak, the current weight amplitudes are
 
 ```text
-0.015 <= |a_k(t)| <= 0.08.
+0.08 <= |a_k(t)| <= 0.35.
 ```
+
+The source count remains 24 so the stronger visible motion does not require adding more Cauchy kernels to every fragment.
 
 There is no coefficient search, sample-point disturbance score, accepted-step counter, coefficient budget, or CPU worker ensemble in the mathematical evolution.
 
