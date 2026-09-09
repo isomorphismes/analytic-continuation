@@ -21,7 +21,7 @@ int main(void) {
     float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
     float score = INFINITY;
 
-    if (!holomorphic_walk_start()) {
+    if (!holomorphic_walk_start(HOLOMORPHIC_WALK_DEFAULT_COEFFICIENT_BUDGET)) {
         fputs("holomorphic_walk_start failed\n", stderr);
         return 1;
     }
@@ -54,7 +54,10 @@ int main(void) {
         return 1;
     }
 
-    if (holomorphic_walk_coefficient_budget(coefficients) > HOLOMORPHIC_WALK_COEFFICIENT_BUDGET) {
+    if (
+        holomorphic_walk_coefficient_budget(coefficients) >
+        HOLOMORPHIC_WALK_DEFAULT_COEFFICIENT_BUDGET
+    ) {
         fputs("zero coefficient state somehow exceeds the budget\n", stderr);
         return 1;
     }
