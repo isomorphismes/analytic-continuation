@@ -27,7 +27,9 @@ static void test_scenario_parser(void) {
         "presentation=clean\n"
         "marker_radius=5.0\n"
         "marker_stroke=1.8\n"
+        "field=wandering_offscreen_poles\n"
         "field_speed=0.42\n"
+        "field_budget=6.0\n"
         "motion=wander\n"
         "seed=7319\n"
         "wander_speed=0.08\n"
@@ -51,7 +53,9 @@ static void test_scenario_parser(void) {
     assert(!scenario.presentation.interaction_enabled);
     assert(near(scenario.presentation.marker_radius_px, 5.0f, 1.0e-6f));
     assert(near(scenario.presentation.marker_stroke_px, 1.8f, 1.0e-6f));
+    assert(scenario.field_background == FIELD_BACKGROUND_WANDERING_OFFSCREEN_POLES);
     assert(near(scenario.field_speed, 0.42f, 1.0e-6f));
+    assert(near(scenario.field_budget, 6.0f, 1.0e-6f));
     assert(scenario.motion.enabled);
     assert(scenario.motion.seed == 7319u);
     assert(scenario.motion.exchange_count == 2);
@@ -89,6 +93,7 @@ static void test_half_circle_exchange(void) {
         motion_program_advance(&motion, &scene, 0.05f);
     }
     assert(motion.exchanges[0].completed);
+    assert(motion_program_completed_exchange_count(&motion) == 1);
     assert(near(scene.zero_positions[0][0], 1.0f, 1.0e-6f));
     assert(near(scene.zero_positions[0][1], 0.0f, 1.0e-6f));
     assert(near(scene.pole_positions[0][0], -1.0f, 1.0e-6f));
