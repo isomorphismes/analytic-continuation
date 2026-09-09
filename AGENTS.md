@@ -1,5 +1,18 @@
 # Agent instructions
 
+## Cross-repository anti-patterns
+
+These rules apply in addition to stricter repository-specific rules below.
+
+- Claim only the boundary actually exercised. Source presence, fixtures, generation, compilation, packaging, installation, launch, smoke checks, semantic execution, backend execution, and physical-device execution are different evidence levels. If a stronger boundary was not exercised, report it as unverified.
+- The named mechanism is part of acceptance. Do not substitute a fallback, oracle, mock, alternate backend, alternate executable, lookalike renderer, or conventional nearby toolchain and keep the original label.
+- Do not weaken acceptance to obtain green. Repair the implementation. Change the contract only when the requirement itself is shown to be wrong or obsolete, and keep that semantic decision explicit. Targeted negative tests must fail for the intended reason when the distinction matters.
+- Keep semantics independent of convenient representations. Mathematical, domain, and language objects are not defined by tuples, matrices, compiler nodes, ABI records, transport bytes, storage shapes, or UI payloads unless the semantics explicitly say so.
+- Current explicit human corrections and current architecture outrank stale source, generated code, upstream conventions, older branches, bootstrap precedent, and familiar practice. Do not restore a rejected abstraction under its old name or a near-synonym.
+- Acceptance belongs to an exact head and its material pins. An ancestor's, sibling branch's, or previous pin's green result is historical evidence only.
+- Mocks, fixtures, harnesses, and today's platform adapter must cross replaceable interfaces; they do not get to define the permanent architecture merely because they are currently convenient.
+- Preserve the repository's chosen implementation path and layout before introducing familiar infrastructure. Where `_` is an established machinery boundary, keep build/package/generated/test/compiler material there and preserve canonical source and intended soft links.
+
 ## Rendering work is runtime work
 
 When a task asks for a screenshot, image, video, MP4, GIF, screen recording, animation, or other visual demonstration of this app or renderer, the evidence must come from the actual software under test running.
@@ -124,3 +137,11 @@ Before presenting a visual artifact as evidence of app behavior, verify all of t
 8. the user-facing animation excludes unrequested system chrome and noninteractive controls.
 
 If any of these cannot be established, say exactly what remains unverified. Do not convert missing runtime evidence into a pass by using a mockup, alternate renderer, alternate backend, or post-production.
+
+## Preserve the source-facing layout
+
+Build systems, packaging, generated files, test harnesses, compiler machinery, receipts, and other build-time support belong under `_` rather than being scattered through the source-facing tree.
+
+Keep maintained source canonical in its source location and expose intended source-facing top-level entries through soft links when the repository uses that pattern. Do not replace a soft link with a duplicate generated copy or let two writable copies of the same source diverge.
+
+Before adding a build instruction or generated artifact outside `_`, verify that it is genuinely part of the maintained source surface rather than build machinery. A familiar Android/Gradle directory layout is not, by itself, a reason to override this repository's layout.
