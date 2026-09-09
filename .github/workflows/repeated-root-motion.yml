@@ -98,6 +98,7 @@ jobs:
             sleep 6
             adb exec-out screencap -p > repeated-root-motion-b.png
             python3 tests/check_cauchy_motion.py repeated-root-motion-a.png repeated-root-motion-b.png --exclude-file /tmp/cauchy-repeated-zero-cluster --min-mean 1.0 --min-changed-fraction 0.08
+            python3 tests/check_cauchy_structure_motion.py repeated-root-motion-a.png repeated-root-motion-b.png --exclude-file /tmp/cauchy-repeated-zero-cluster
             ! grep -Eiq 'shader compilation failed|program link failed|eglInitialize failed|could not choose GLES3 EGL config|could not create EGL surface/context|eglMakeCurrent failed|Cauchy field shader uniforms unavailable|FATAL EXCEPTION' repeated-root-emulator.log
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
