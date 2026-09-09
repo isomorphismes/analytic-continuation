@@ -52,7 +52,7 @@ vec2 remote_pole_direction(int index) {
 
 float remote_pole_radius_scale(int index) {
     float k = float(index);
-    return mix(2.05, 3.05, hash1(k + 1.73));
+    return mix(2.75, 4.00, hash1(k + 1.73));
 }
 
 vec2 remote_pole_motion(int index) {
