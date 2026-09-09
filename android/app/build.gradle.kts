@@ -39,6 +39,9 @@ if (sideloadSigningAvailable && !sideloadKeystoreFile.exists()) {
     )
 }
 
+val continuationFragmentOverride = System.getenv("ANALYTIC_CONTINUATION_FRAGMENT_OVERRIDE")
+    ?.takeIf { it.isNotBlank() }
+    ?.let(::file)
 val wegertColorMarker = "/*__WEGERT_COLOR_CORE__*/"
 val generatedWegertAssets = layout.buildDirectory.dir("generated/wegert-assets")
 val assembleContinuationShader = tasks.register("assembleContinuationShader") {
@@ -47,20 +50,28 @@ val assembleContinuationShader = tasks.register("assembleContinuationShader") {
     val output = generatedWegertAssets.map { it.file("continuation.frag") }
 
     inputs.files(template, colorCore)
+    continuationFragmentOverride?.let { inputs.file(it) }
     outputs.file(output)
 
     doLast {
-        val templateText = template.readText()
-        check(templateText.contains(wegertColorMarker)) {
-            "Continuation fragment template is missing the Wegert coloring-core marker"
-        }
-        check(templateText.indexOf(wegertColorMarker) == templateText.lastIndexOf(wegertColorMarker)) {
-            "Continuation fragment template must contain exactly one Wegert coloring-core marker"
-        }
-
         val outputFile = output.get().asFile
         outputFile.parentFile.mkdirs()
-        outputFile.writeText(templateText.replace(wegertColorMarker, colorCore.readText()))
+
+        if (continuationFragmentOverride != null) {
+            check(continuationFragmentOverride.isFile) {
+                "ANALYTIC_CONTINUATION_FRAGMENT_OVERRIDE does not name a readable fragment"
+            }
+            outputFile.writeText(continuationFragmentOverride.readText())
+        } else {
+            val templateText = template.readText()
+            check(templateText.contains(wegertColorMarker)) {
+                "Continuation fragment template is missing the Wegert coloring-core marker"
+            }
+            check(templateText.indexOf(wegertColorMarker) == templateText.lastIndexOf(wegertColorMarker)) {
+                "Continuation fragment template must contain exactly one Wegert coloring-core marker"
+            }
+            outputFile.writeText(templateText.replace(wegertColorMarker, colorCore.readText()))
+        }
     }
 }
 
