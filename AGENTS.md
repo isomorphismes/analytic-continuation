@@ -90,11 +90,27 @@ When the model deliberately multiplies a rational zero/pole factor by a holomorp
 
 If the user asks for the field, soup, or background to evolve while poles/zeros wander, both must evolve together in the running app. Do not freeze one layer and synthesize motion in the other afterward.
 
+## Presentation video means the visualization, not device chrome
+
+A runtime video intended as an animation, visual example, artwork, or mathematical demonstration should normally contain the visualization itself, not the surrounding Android interface.
+
+Unless the task explicitly asks to demonstrate interaction or device UI, exclude from the delivered animation:
+
+- the Android status bar, clock, battery, network and notification icons;
+- Android navigation buttons or gesture/navigation chrome;
+- emulator/device frames or black borders that are not part of the rendered viewport;
+- app placement controls, tool buttons, menus, debug overlays, touch indicators, or other controls that the viewer cannot use in the finished video;
+- transient UI shown only to set up the state before recording.
+
+Prefer a real runtime presentation/capture mode that hides system bars and app controls while leaving the actual renderer running. If the app does not have such a mode and the requested deliverable is a clean animation, add one or otherwise capture only the app's content surface. A crop that removes only non-content device chrome is acceptable when it does not rescale, distort, recompose, or fabricate the visualization, but runtime hiding is preferable.
+
+Keep a separate uncropped/raw runtime capture when needed for provenance or debugging. Do not confuse that evidence recording with the user-facing animation. The final presentation artifact should be clean unless the user explicitly asks to see controls or the full device screen.
+
 ## Capture and delivery
 
 Capture screenshots and moving evidence from the running process. For Android, verify that the installed package remains live during capture and retain logs or equivalent receipts sufficient to establish the executing path.
 
-Post-processing is limited to operations that do not invent or alter demonstrated behavior, such as trimming, container conversion, audio removal, or ordinary encoding/resizing. Do not use transitions, frame synthesis, color grading, stabilization, or interpolation to repair the evidence.
+Post-processing is limited to operations that do not invent or alter demonstrated behavior, such as trimming, container conversion, audio removal, ordinary encoding/resizing, or removing non-content device chrome as described above. Do not use transitions, frame synthesis, color grading, stabilization, or interpolation to repair the evidence.
 
 Before presenting a visual artifact as evidence of app behavior, verify all of the following:
 
@@ -104,6 +120,7 @@ Before presenting a visual artifact as evidence of app behavior, verify all of t
 4. the capture is from a continuous runtime segment rather than a reconstruction;
 5. the motion is visually continuous where continuity is intended;
 6. established rendering/color behavior has not changed unintentionally;
-7. mathematical object identities and requested simultaneous background motion are preserved.
+7. mathematical object identities and requested simultaneous background motion are preserved;
+8. the user-facing animation excludes unrequested system chrome and noninteractive controls.
 
 If any of these cannot be established, say exactly what remains unverified. Do not convert missing runtime evidence into a pass by using a mockup, alternate renderer, alternate backend, or post-production.
