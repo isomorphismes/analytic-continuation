@@ -6,7 +6,6 @@ precision highp int;
 
 #define MAX_FACTORS 32
 #define HOLOMORPHIC_COEFFICIENT_COUNT 5
-#define REMOTE_POLE_COUNT 24
 
 in vec2 v_ndc;
 out vec4 frag_color;
@@ -17,8 +16,6 @@ uniform int u_pole_count;
 uniform vec2 u_zero_positions[MAX_FACTORS];
 uniform vec2 u_pole_positions[MAX_FACTORS];
 uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];
-uniform int u_remote_poles_enabled;
-uniform float u_remote_pole_time;
 uniform float u_zoom;
 uniform int u_placement_kind;
 uniform int u_show_controls;
@@ -33,8 +30,6 @@ vec2 complex_multiply(vec2 left, vec2 right) {
 }
 
 vec2 holomorphic_q(vec2 z) {
-    // Keep the normalization fixed in the mathematical plane rather than tied
-    // to zoom, but make the live entire factor large enough to read on a phone.
     vec2 u = z / 3.0;
     vec2 power = u;
     vec2 q = vec2(0.0);
@@ -43,51 +38,6 @@ vec2 holomorphic_q(vec2 z) {
         power = complex_multiply(power, u);
     }
     return q;
-}
-
-float hash1(float x) {
-    return fract(sin(x * 127.1 + 31.7) * 43758.5453123);
-}
-
-vec2 remote_pole_direction(int index) {
-    float k = float(index);
-    float angle = 6.2831853 * hash1(k + 0.11);
-    return vec2(cos(angle), sin(angle));
-}
-
-float remote_pole_radius_scale(int index) {
-    float k = float(index);
-    return mix(2.75, 4.00, hash1(k + 1.73));
-}
-
-float remote_pole_orbit_speed(int index) {
-    float k = float(index);
-    return mix(0.11, 0.19, hash1(k + 4.37));
-}
-
-float remote_pole_handedness(int index) {
-    float k = float(index);
-    return hash1(k + 7.91) < 0.5 ? -1.0 : 1.0;
-}
-
-vec2 remote_pole_position(int index, float view_outer_radius) {
-    float k = float(index);
-    vec2 initial_direction = remote_pole_direction(index);
-    float initial_angle = atan(initial_direction.y, initial_direction.x);
-    float angle = initial_angle
-        + remote_pole_handedness(index) * remote_pole_orbit_speed(index) * u_remote_pole_time;
-
-    float bend_phase = 6.2831853 * hash1(k + 11.23);
-    float radial_bend = 0.22 * sin(2.0 * angle + bend_phase);
-    float radius = remote_pole_radius_scale(index) + radial_bend;
-
-    float ellipticity = mix(-0.08, 0.08, hash1(k + 14.67));
-    vec2 orbit = vec2(
-        (1.0 + ellipticity) * cos(angle),
-        (1.0 - ellipticity) * sin(angle)
-    );
-
-    return view_outer_radius * radius * orbit;
 }
 
 float circle_mask(vec2 point, vec2 center, float radius) {
@@ -114,12 +64,10 @@ void main() {
     float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y) * u_zoom;
     vec2 pixel = gl_FragCoord.xy - 0.5 * u_resolution;
     vec2 z = pixel / pixel_radius;
-    float view_outer_radius = length(0.5 * u_resolution) / pixel_radius;
 
     float phase = 0.0;
     float log_modulus = 0.0;
 
-    // R(z): the explicit meromorphic divisor on the ordinary complex plane.
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_zero_count) break;
         vec2 delta = z - u_zero_positions[index];
@@ -136,21 +84,6 @@ void main() {
         log_modulus -= 0.5 * log(radius_squared);
     }
 
-    // Optional experimental soup: twenty-four additional poles remain well
-    // outside the circumscribed visible region. On the visible region their
-    // factor is holomorphic and nonzero, but unlike exp(q) it is not entire on
-    // the whole complex plane. Keep this mode explicit rather than conflating it
-    // with the ordinary whole-plane holomorphic perturbation.
-    if (u_remote_poles_enabled != 0) {
-        for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
-            vec2 pole = remote_pole_position(index, view_outer_radius);
-            vec2 delta = z - pole;
-            float radius_squared = max(dot(delta, delta), 1.0e-16);
-            phase -= atan(delta.y, delta.x);
-            log_modulus -= 0.5 * log(radius_squared);
-        }
-    }
-
     // H(z) = exp(q(z)) is entire and nonzero, so it changes neither zeros nor
     // poles. Re(q) adds to log modulus and Im(q) adds to phase exactly.
     vec2 q = holomorphic_q(z);
@@ -159,8 +92,6 @@ void main() {
 
     vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);
 
-    // Marker geometry is presentation state, not mathematical state. The default
-    // interactive values reproduce the previous 9 px zero and 7 px pole marks.
     float marker_radius = max(u_marker_radius, 1.5);
     float marker_stroke = clamp(u_marker_stroke, 0.75, marker_radius - 0.5);
     float zero_inner = marker_radius - marker_stroke;
@@ -204,10 +135,7 @@ void main() {
     if (u_show_controls != 0) {
         float placement_radius = clamp(0.048 * min(u_resolution.x, u_resolution.y), 26.0, 38.0);
         vec2 zero_center = vec2(placement_radius + 16.0, placement_radius + 16.0);
-        vec2 pole_center = vec2(
-            zero_center.x + 2.0 * placement_radius + 14.0,
-            zero_center.y
-        );
+        vec2 pole_center = vec2(zero_center.x + 2.0 * placement_radius + 14.0, zero_center.y);
 
         bool zero_selected = u_placement_kind == 0;
         bool pole_selected = u_placement_kind == 1;
