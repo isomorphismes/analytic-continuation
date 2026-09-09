@@ -311,7 +311,9 @@ static bool initialize_display(struct engine *engine) {
     eglGetConfigAttrib(display, config, EGL_NATIVE_VISUAL_ID, &format);
     ANativeWindow_setBuffersGeometry(engine->app->window, 0, 0, format);
 
-    EGLSurface surface = eglCreateWindowSurface(display, config, app->window, NULL);
+    EGLSurface surface = eglCreateWindowSurface(
+        display, config, engine->app->window, NULL
+    );
     EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attributes);
     if (surface == EGL_NO_SURFACE || context == EGL_NO_CONTEXT) {
         LOGE("could not create EGL surface/context: 0x%x", eglGetError());
