@@ -63,6 +63,7 @@ bool motion_program_advance(
     float dt
 );
 
+int motion_program_completed_exchange_count(const struct motion_program *program);
 bool motion_program_complete(const struct motion_program *program);
 
 #endif
