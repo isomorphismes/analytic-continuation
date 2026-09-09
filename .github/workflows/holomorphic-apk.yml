@@ -37,7 +37,7 @@ jobs:
       - name: Verify random holomorphic architecture
         run: |
           grep -Fq '#define HOLOMORPHIC_WALK_WORKER_COUNT 3' android/app/src/main/cpp/holomorphic_walk.h
-          grep -Fq '#define HOLOMORPHIC_WALK_COEFFICIENT_BUDGET 1.20f' android/app/src/main/cpp/holomorphic_walk.h
+          grep -Fq '#define HOLOMORPHIC_WALK_COEFFICIENT_BUDGET 6.00f' android/app/src/main/cpp/holomorphic_walk.h
           grep -Fq '#define SEARCH_CANDIDATES 128' android/app/src/main/cpp/holomorphic_walk.c
           grep -Fq 'Re(delta_q) and Im(delta_q) are log-modulus/phase sensitivities' android/app/src/main/cpp/holomorphic_walk.c
           grep -Fq 'holomorphic_walk_best_direction' android/app/src/main/cpp/analytic_continuation_random.c
@@ -47,6 +47,9 @@ jobs:
           grep -Fq 'HOLOMORPHIC_WALK_COEFFICIENT_BUDGET' android/app/src/main/cpp/analytic_continuation_random.c
           ! grep -Fq 'pause_control_contains' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'u_holomorphic_coefficients' android/app/src/main/assets/continuation.frag.in
+          grep -Fq '#define REMOTE_POLE_COUNT 24' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'uniform float u_remote_pole_time;' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'remote_pole_orbit_speed' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'vec2 u = z / 3.0;' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'log_modulus += q.x;' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'phase += q.y;' android/app/src/main/assets/continuation.frag.in
