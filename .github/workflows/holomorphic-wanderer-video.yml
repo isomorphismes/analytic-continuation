@@ -1,0 +1,60 @@
+name: Capture holomorphic wanderer runtime video
+
+on:
+  push:
+    branches:
+      - video/holomorphic-wanderers
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install native Android toolchain
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Build the holomorphic-tag application
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Enable KVM permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run the app, wander the divisor, and record it
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: medium_phone
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
+          script: bash video/capture_holomorphic_wanderers.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: holomorphic-wanderers-runtime-video
+          path: |
+            holomorphic-wanderers.mp4
+            holomorphic-wanderers.log
+            holomorphic-wanderers-start.png
+            holomorphic-wanderers-end.png
+          if-no-files-found: error
