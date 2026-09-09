@@ -1,0 +1,163 @@
+name: properly typed GPU fragment
+
+on:
+  push:
+    branches:
+      - properly-typed
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IDRIS2_VERSION: 0.8.0
+  SHADER_BACKEND_SHA: 4360f29d3bbdc09b4cc513e4a6be647f290ffede
+
+jobs:
+  compile-handwritten-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out Analytic Continuation
+        uses: actions/checkout@v4
+
+      - name: Check out typed shader backend
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/idris-shader-backend
+          ref: ${{ env.SHADER_BACKEND_SHA }}
+          path: .shader-backend
+          persist-credentials: false
+
+      - name: Install compiler and shader validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chezscheme glslang-tools libgmp-dev
+
+      - name: Restore Idris 2 compiler and API
+        id: idris-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.idris2
+          key: properly-typed-idris2-${{ runner.os }}-${{ runner.arch }}-${{ env.IDRIS2_VERSION }}-api-v1
+
+      - name: Build self-hosted Idris 2 and compiler API
+        if: steps.idris-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "v${IDRIS2_VERSION}" \
+            https://github.com/idris-lang/Idris2.git /tmp/Idris2
+          make -C /tmp/Idris2 bootstrap SCHEME=chezscheme
+          make -C /tmp/Idris2 install
+          export PATH="$HOME/.idris2/bin:$PATH"
+          make -C /tmp/Idris2 clean
+          make -C /tmp/Idris2 all
+          make -C /tmp/Idris2 install
+          make -C /tmp/Idris2 install-api
+
+      - name: Put Idris 2 on PATH
+        run: echo "$HOME/.idris2/bin" >> "$GITHUB_PATH"
+
+      - name: Build GLSL ES backend
+        run: make -C .shader-backend backend
+
+      - name: Bind typed twin to the current handwritten fragment contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          live = Path('android/app/src/main/assets/continuation.frag.in').read_text()
+          required = [
+              '#define MAX_FACTORS 32',
+              '#define HOLOMORPHIC_COEFFICIENT_COUNT 5',
+              'uniform vec2 u_zero_positions[MAX_FACTORS];',
+              'uniform vec2 u_pole_positions[MAX_FACTORS];',
+              'uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];',
+              'float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y) * u_zoom;',
+              'vec2 u = z / 3.0;',
+              'float radius_squared = max(dot(delta, delta), 1.0e-16);',
+              'log_modulus += q.x;',
+              'phase += q.y;',
+          ]
+          missing = [piece for piece in required if piece not in live]
+          if missing:
+              raise SystemExit('typed probe contract drifted from live handwritten fragment: ' + repr(missing))
+          PY
+
+      - name: Compile typed twin through the real backend
+        run: |
+          mkdir -p build/properly-typed
+          cp gpu/Example/AnalyticContinuationHandwrittenCore.idr \
+            .shader-backend/src/Example/AnalyticContinuationHandwrittenCore.idr
+          cd .shader-backend
+          ./build/exec/idris2-glsles \
+            --cg glsles \
+            --directive dump-ir="$GITHUB_WORKSPACE/build/properly-typed/analytic-continuation-handwritten-core.ir" \
+            --source-dir src \
+            --output-dir "$GITHUB_WORKSPACE/build/properly-typed" \
+            src/Example/AnalyticContinuationHandwrittenCore.idr \
+            -o analytic-continuation-handwritten-core
+
+      - name: Validate generated typed fragment
+        run: |
+          fragment=build/properly-typed/analytic-continuation-handwritten-core.frag
+          test -s "$fragment"
+          test -s build/properly-typed/analytic-continuation-handwritten-core.ir
+          grep -F 'precision highp float;' "$fragment"
+          grep -F 'uniform vec2 u_resolution;' "$fragment"
+          grep -F 'uniform int u_zero_count;' "$fragment"
+          grep -F 'uniform int u_pole_count;' "$fragment"
+          grep -F 'uniform vec2 u_zero_positions[32];' "$fragment"
+          grep -F 'uniform vec2 u_pole_positions[32];' "$fragment"
+          grep -F 'uniform vec2 u_holomorphic_coefficients[5];' "$fragment"
+          grep -F 'atan(' "$fragment"
+          grep -F 'log(' "$fragment"
+          glslangValidator -S frag "$fragment"
+          glslangValidator -l \
+            .shader-backend/fixtures/wegert-fullscreen.vert \
+            "$fragment"
+
+      - name: Assemble and validate the live handwritten fragment
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          template = Path('android/app/src/main/assets/continuation.frag.in').read_text()
+          core = Path('android/app/src/main/assets/wegert_color.glsl').read_text()
+          assembled = template.replace('/*__WEGERT_COLOR_CORE__*/', core)
+          Path('build/properly-typed/live-handwritten.frag').write_text(assembled)
+          PY
+          glslangValidator -S frag build/properly-typed/live-handwritten.frag
+
+      - name: Write compiler-stage receipt
+        run: |
+          typed_sha=$(sha256sum build/properly-typed/analytic-continuation-handwritten-core.frag | cut -d' ' -f1)
+          ir_sha=$(sha256sum build/properly-typed/analytic-continuation-handwritten-core.ir | cut -d' ' -f1)
+          handwritten_sha=$(sha256sum build/properly-typed/live-handwritten.frag | cut -d' ' -f1)
+          cat > build/properly-typed/receipt.tsv <<EOF
+          PROPERLY_TYPED_FRAGMENT_RECEIPT	1
+          analytic_continuation_sha	${GITHUB_SHA}
+          shader_backend_sha	${SHADER_BACKEND_SHA}
+          source_fragment	android/app/src/main/assets/continuation.frag.in
+          stage	handwritten_contract_binding	PASS
+          stage	typed_ir_generation	PASS
+          stage	shader_generation	PASS
+          stage	generated_shader_validation	PASS
+          stage	generated_program_link	PASS
+          stage	handwritten_shader_validation	PASS
+          stage	shader_load	SKIP	no GLES driver execution in this lane
+          stage	gpu_execution	SKIP	no physical or software GPU execution in this lane
+          stage	framebuffer_comparison	SKIP	first probe is compile/link only
+          stage	vendor_device_receipt	SKIP	phone acceptance is separate
+          generated_fragment_sha256	${typed_sha}
+          typed_ir_sha256	${ir_sha}
+          handwritten_fragment_sha256	${handwritten_sha}
+          EOF
+          cat build/properly-typed/receipt.tsv
+
+      - name: Retain typed fragment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: properly-typed-fragment
+          path: build/properly-typed
+          if-no-files-found: warn
