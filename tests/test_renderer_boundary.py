@@ -75,9 +75,11 @@ class RendererBoundaryTests(unittest.TestCase):
         self.assertIn("vec2 source_position", shader)
         self.assertIn("vec2 source_weight", shader)
         self.assertIn("vec2 holomorphic_field", shader)
-        self.assertIn("1.8 * view_radius", shader)
-        self.assertIn("0.35 * view_radius", shader)
-        self.assertGreater(1.8 - 0.35, 1.0)
+        self.assertIn("float source_radius_scale", shader)
+        self.assertIn("return mix(2.75, 4.00", shader)
+        self.assertIn("float source_orbit_speed", shader)
+        self.assertIn("float source_handedness", shader)
+        self.assertIn("return view_radius * radius * orbit;", shader)
 
     def test_zoom_range_is_not_artificially_tight(self) -> None:
         cpp = (
