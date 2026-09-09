@@ -124,3 +124,11 @@ Before presenting a visual artifact as evidence of app behavior, verify all of t
 8. the user-facing animation excludes unrequested system chrome and noninteractive controls.
 
 If any of these cannot be established, say exactly what remains unverified. Do not convert missing runtime evidence into a pass by using a mockup, alternate renderer, alternate backend, or post-production.
+
+## Preserve the source-facing layout
+
+Build systems, packaging, generated files, test harnesses, compiler machinery, receipts, and other build-time support belong under `_` rather than being scattered through the source-facing tree.
+
+Keep maintained source canonical in its source location and expose intended source-facing top-level entries through soft links when the repository uses that pattern. Do not replace a soft link with a duplicate generated copy or let two writable copies of the same source diverge.
+
+Before adding a build instruction or generated artifact outside `_`, verify that it is genuinely part of the maintained source surface rather than build machinery. A familiar Android/Gradle directory layout is not, by itself, a reason to override this repository's layout.
