@@ -1,0 +1,106 @@
+name: Analytic Continuation lowp runtime
+
+on:
+  push:
+    branches:
+      - properly-typed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lowp-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out Analytic Continuation
+        uses: actions/checkout@v4
+
+      - name: Assert the live fragment requests lowp
+        run: |
+          fragment=android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'precision lowp float;' "$fragment"
+          ! grep -Fq 'precision highp float;' "$fragment"
+          ! grep -Fq 'precision mediump float;' "$fragment"
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install Android build dependencies
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Build the ordinary app
+        working-directory: android
+        run: ./gradlew --no-daemon clean :app:assembleDebug
+
+      - name: Prove the packaged fragment is lowp
+        run: |
+          mkdir -p build/lowp-runtime
+          cp android/app/build/outputs/apk/debug/app-debug.apk build/lowp-runtime/analytic-continuation-lowp.apk
+          unzip -p build/lowp-runtime/analytic-continuation-lowp.apk assets/continuation.frag > build/lowp-runtime/continuation.frag
+          grep -Fq 'precision lowp float;' build/lowp-runtime/continuation.frag
+          ! grep -Fq 'precision highp float;' build/lowp-runtime/continuation.frag
+          ! grep -Fq 'precision mediump float;' build/lowp-runtime/continuation.frag
+          sha256sum build/lowp-runtime/analytic-continuation-lowp.apk build/lowp-runtime/continuation.frag
+
+      - name: Enable KVM permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Load and execute the lowp fragment on Android GLES3
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: medium_phone
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
+          script: |
+            set -eux
+            adb install -r build/lowp-runtime/analytic-continuation-lowp.apk
+            adb logcat -c
+            adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
+            sleep 5
+            adb logcat -d > build/lowp-runtime/emulator.log
+            grep -Fq 'holomorphic field renderer ready:' build/lowp-runtime/emulator.log
+            grep -Fq 'holomorphic field first frame:' build/lowp-runtime/emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|holomorphic field shader uniforms unavailable|FATAL EXCEPTION' build/lowp-runtime/emulator.log
+            adb exec-out screencap -p > build/lowp-runtime/frame.png
+
+      - name: Write lowp runtime receipt
+        if: success()
+        run: |
+          apk_sha=$(sha256sum build/lowp-runtime/analytic-continuation-lowp.apk | cut -d' ' -f1)
+          shader_sha=$(sha256sum build/lowp-runtime/continuation.frag | cut -d' ' -f1)
+          cat > build/lowp-runtime/receipt.tsv <<EOF
+          ANALYTIC_CONTINUATION_LOWP_RECEIPT\t1
+          analytic_continuation_sha\t${GITHUB_SHA}
+          float_precision\tlowp
+          stage\tlive_source_lowp_guard\tPASS
+          stage\tandroid_apk_build\tPASS
+          stage\tpackaged_shader_lowp_guard\tPASS
+          stage\tshader_load\tPASS\tAndroid emulator GLES3/SwiftShader
+          stage\tgpu_execution\tPASS\tAndroid emulator GLES3/SwiftShader
+          stage\tphysical_device_receipt\tSKIP\ttablet/phone timing remains separate
+          apk_sha256\t${apk_sha}
+          shader_sha256\t${shader_sha}
+          EOF
+          cat build/lowp-runtime/receipt.tsv
+
+      - name: Retain lowp APK and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analytic-continuation-lowp-runtime
+          path: build/lowp-runtime
+          if-no-files-found: error
