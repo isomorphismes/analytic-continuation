@@ -43,10 +43,15 @@ jobs:
           target: default
           arch: x86_64
           profile: medium_phone
-          ram-size: 2048M
+          cores: 4
+          ram-size: 3072M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
-          script: bash video/capture_holomorphic_wanderers.sh
+          script: |
+            sed -i 's/adb shell wm size 720x1280/adb shell wm size 270x480/' video/capture_holomorphic_wanderers.sh
+            sed -i 's/adb shell wm density 320/adb shell wm density 160/' video/capture_holomorphic_wanderers.sh
+            sed -i 's/screenrecord --bit-rate 10000000 --time-limit 23/screenrecord --size 480x270 --bit-rate 4000000 --time-limit 23/' video/capture_holomorphic_wanderers.sh
+            bash video/capture_holomorphic_wanderers.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
