@@ -77,3 +77,39 @@ Keep three independent gates:
 
 The third gate is the missing one. When designing it, go back to Mumford/Desolneux
 rather than inventing another whole-frame scalar that can be fooled by texture churn.
+
+## First calibrated structure-motion test
+
+The first implemented structural gate is `tests/check_cauchy_structure_motion.py`.
+It is deliberately simpler than full block matching or optical flow. It compares the
+raw RGB motion with the motion that survives aggressive grayscale low-pass/downsample
+steps at several coarse scales. The useful quantity is the fraction of raw motion
+retained after fine color texture has been suppressed.
+
+Current acceptance threshold:
+
+- median coarse-motion retention must be at least `0.30`.
+
+Calibration came from real running-APK captures, not synthetic images:
+
+| case | raw RGB mean change | coarse grayscale change | retention | result |
+| --- | ---: | --- | --- | --- |
+| ordinary one-zero/one-pole soup | `2.822` | `[1.536, 1.467, 1.446]` | `[0.544, 0.520, 0.512]`, median `0.520` | PASS |
+| eight nearly coincident zeros | `32.197` | `[6.444, 6.015, 5.644]` | `[0.200, 0.187, 0.175]`, median `0.187` | FAIL |
+
+The repeated-root frame pair still passed the old pixel-motion gate with about `92.6%`
+of eligible pixels changing, yet failed the structural gate. That is exactly the
+failure mode this note was meant to capture: **more pixel churn can coexist with less
+large-scale motion**.
+
+The ordinary APK rerun passed the new structural gate at `0.520`, giving useful
+separation around the `0.30` threshold. An earlier ordinary six-second window failed
+the old RGB gate (`mean_abs_rgb=1.152`, `changed_fraction=0.032`) before reaching the
+structural checker, while a rerun passed (`2.822`, `0.186`). Treat that as evidence
+that a single fixed RGB window is a brittle smoke test; do not weaken the structural
+threshold to accommodate it. A later improvement can sample several time windows.
+
+This first structural test is an oracle for current renderer work, not the end of the
+Mumford direction. The next stronger version should estimate coarse block displacement,
+neighbor coherence, and warp improvement so that it measures actual geometric motion
+rather than only survival under scale-space filtering.
