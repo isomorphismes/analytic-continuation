@@ -16,7 +16,6 @@ uniform int u_pole_count;
 uniform vec2 u_zero_positions[MAX_FACTORS];
 uniform vec2 u_pole_positions[MAX_FACTORS];
 uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];
-uniform int u_paused;
 uniform float u_zoom;
 uniform int u_placement_kind;
 
@@ -28,9 +27,9 @@ vec2 complex_multiply(vec2 left, vec2 right) {
 }
 
 vec2 holomorphic_q(vec2 z) {
-    // Fixed normalization keeps q entire while making its coefficient budget
-    // numerically useful over the phone's ordinary zoom range.
-    vec2 u = z / 6.0;
+    // Keep the normalization fixed in the mathematical plane rather than tied
+    // to zoom, but make the live entire factor large enough to read on a phone.
+    vec2 u = z / 3.0;
     vec2 power = u;
     vec2 q = vec2(0.0);
     for (int index = 0; index < HOLOMORPHIC_COEFFICIENT_COUNT; ++index) {
@@ -122,45 +121,6 @@ void main() {
         );
         color = mix(color, vec3(0.04), pole_mark);
     }
-
-    float pause_radius = clamp(0.052 * min(u_resolution.x, u_resolution.y), 28.0, 42.0);
-    vec2 pause_center = vec2(
-        pause_radius + 16.0,
-        u_resolution.y - pause_radius - 16.0
-    );
-    float pause_disk = circle_mask(gl_FragCoord.xy, pause_center, pause_radius);
-    color = mix(color, vec3(0.04), pause_disk * 0.78);
-
-    float pause_mark = 0.0;
-    if (u_paused == 0) {
-        pause_mark = max(
-            line_mask(
-                gl_FragCoord.xy,
-                pause_center + vec2(-8.0, -11.0),
-                pause_center + vec2(-8.0, 11.0),
-                2.2
-            ),
-            line_mask(
-                gl_FragCoord.xy,
-                pause_center + vec2(8.0, -11.0),
-                pause_center + vec2(8.0, 11.0),
-                2.2
-            )
-        );
-    } else {
-        vec2 left_top = pause_center + vec2(-9.0, -12.0);
-        vec2 point = pause_center + vec2(11.0, 0.0);
-        vec2 left_bottom = pause_center + vec2(-9.0, 12.0);
-        pause_mark = max(
-            line_mask(gl_FragCoord.xy, left_top, point, 2.2),
-            line_mask(gl_FragCoord.xy, point, left_bottom, 2.2)
-        );
-        pause_mark = max(
-            pause_mark,
-            line_mask(gl_FragCoord.xy, left_bottom, left_top, 2.2)
-        );
-    }
-    color = mix(color, vec3(0.98), pause_mark);
 
     float placement_radius = clamp(0.048 * min(u_resolution.x, u_resolution.y), 26.0, 38.0);
     vec2 zero_center = vec2(placement_radius + 16.0, placement_radius + 16.0);
