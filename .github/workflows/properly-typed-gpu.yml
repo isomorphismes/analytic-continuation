@@ -15,9 +15,9 @@ env:
   SHADER_BACKEND_SHA: 4360f29d3bbdc09b4cc513e4a6be647f290ffede
 
 jobs:
-  compile-handwritten-core:
+  compare-on-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Check out Analytic Continuation
         uses: actions/checkout@v4
@@ -30,10 +30,18 @@ jobs:
           path: .shader-backend
           persist-credentials: false
 
-      - name: Install compiler and shader validation dependencies
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install compiler, shader, image, and Android dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes chezscheme glslang-tools libgmp-dev
+          sudo apt-get install --yes chezscheme glslang-tools libgmp-dev python3-pil
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
       - name: Restore Idris 2 compiler and API
         id: idris-cache
@@ -73,6 +81,7 @@ jobs:
               'uniform vec2 u_zero_positions[MAX_FACTORS];',
               'uniform vec2 u_pole_positions[MAX_FACTORS];',
               'uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];',
+              'uniform int u_placement_kind;',
               'float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y) * u_zoom;',
               'vec2 u = z / 3.0;',
               'float radius_squared = max(dot(delta, delta), 1.0e-16);',
@@ -84,7 +93,7 @@ jobs:
               raise SystemExit('typed probe contract drifted from live handwritten fragment: ' + repr(missing))
           PY
 
-      - name: Compile typed twin through the real backend
+      - name: Compile typed core through the real backend
         run: |
           mkdir -p build/properly-typed
           cp gpu/Example/AnalyticContinuationHandwrittenCore.idr \
@@ -98,9 +107,40 @@ jobs:
             src/Example/AnalyticContinuationHandwrittenCore.idr \
             -o analytic-continuation-handwritten-core
 
-      - name: Validate generated typed fragment
+      - name: Adapt generated core to the live Android uniform ABI
         run: |
-          fragment=build/properly-typed/analytic-continuation-handwritten-core.frag
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('build/properly-typed/analytic-continuation-handwritten-core.frag')
+          output_path = Path('build/properly-typed/analytic-continuation-typed-probe.frag')
+          shader = source_path.read_text()
+          needle = 'uniform float u_zoom;\n'
+          if needle not in shader:
+              raise SystemExit('generated shader lost u_zoom')
+          shader = shader.replace(needle, needle + 'uniform int u_placement_kind;\n', 1)
+
+          lines = shader.splitlines()
+          assignment = None
+          for index in range(len(lines) - 1, -1, -1):
+              stripped = lines[index].strip()
+              if stripped.startswith('_idris_fragColor = ') and stripped.endswith(';'):
+                  assignment = index
+                  break
+          if assignment is None:
+              raise SystemExit('generated shader output assignment not found')
+          rhs = lines[assignment].strip().split('=', 1)[1].strip()[:-1]
+          lines[assignment:assignment + 1] = [
+              '  if (u_placement_kind < -1000) {',
+              '    _idris_fragColor = vec4(0.0);',
+              '  } else {',
+              f'    _idris_fragColor = {rhs};',
+              '  }',
+          ]
+          output_path.write_text('\n'.join(lines) + '\n')
+          PY
+
+          fragment=build/properly-typed/analytic-continuation-typed-probe.frag
           test -s "$fragment"
           test -s build/properly-typed/analytic-continuation-handwritten-core.ir
           grep -F 'precision highp float;' "$fragment"
@@ -110,6 +150,7 @@ jobs:
           grep -F 'uniform vec2 u_zero_positions[32];' "$fragment"
           grep -F 'uniform vec2 u_pole_positions[32];' "$fragment"
           grep -F 'uniform vec2 u_holomorphic_coefficients[5];' "$fragment"
+          grep -F 'uniform int u_placement_kind;' "$fragment"
           grep -F 'atan(' "$fragment"
           grep -F 'log(' "$fragment"
           glslangValidator -S frag "$fragment"
@@ -117,24 +158,206 @@ jobs:
             .shader-backend/fixtures/wegert-fullscreen.vert \
             "$fragment"
 
-      - name: Assemble and validate the live handwritten fragment
+      - name: Derive the matching handwritten core probe
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           template = Path('android/app/src/main/assets/continuation.frag.in').read_text()
-          core = Path('android/app/src/main/assets/wegert_color.glsl').read_text()
-          assembled = template.replace('/*__WEGERT_COLOR_CORE__*/', core)
-          Path('build/properly-typed/live-handwritten.frag').write_text(assembled)
+          color_core = Path('android/app/src/main/assets/wegert_color.glsl').read_text()
+          live = template.replace('/*__WEGERT_COLOR_CORE__*/', color_core)
+          Path('build/properly-typed/live-handwritten.frag').write_text(live)
+
+          anchor = '    vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);\n'
+          if anchor not in live:
+              raise SystemExit('could not locate live color handoff')
+          prefix = live.split(anchor, 1)[0] + anchor
+          probe = prefix + '''\n    if (u_placement_kind < -1000) {\n        frag_color = vec4(0.0);\n    } else {\n        frag_color = vec4(color, 1.0);\n    }\n}\n'''
+          Path('build/properly-typed/handwritten-core-probe.frag').write_text(probe)
           PY
           glslangValidator -S frag build/properly-typed/live-handwritten.frag
+          glslangValidator -S frag build/properly-typed/handwritten-core-probe.frag
+          glslangValidator -l \
+            .shader-backend/fixtures/wegert-fullscreen.vert \
+            build/properly-typed/handwritten-core-probe.frag
 
-      - name: Write compiler-stage receipt
+      - name: Freeze mathematical motion for framebuffer comparison builds
         run: |
-          typed_sha=$(sha256sum build/properly-typed/analytic-continuation-handwritten-core.frag | cut -d' ' -f1)
+          cp android/app/src/main/cpp/analytic_continuation_random.c /tmp/analytic_continuation_random.c
+          sed -i 's/const float speed = 0.30f;/const float speed = 0.0f;/' \
+            android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'const float speed = 0.0f;' android/app/src/main/cpp/analytic_continuation_random.c
+
+      - name: Build frozen handwritten-core APK
+        working-directory: android
+        env:
+          ANALYTIC_CONTINUATION_FRAGMENT_OVERRIDE: ${{ github.workspace }}/build/properly-typed/handwritten-core-probe.frag
+        run: |
+          ./gradlew --no-daemon clean :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            ../build/properly-typed/handwritten-core-frozen.apk
+
+      - name: Build frozen compiler-generated-core APK
+        working-directory: android
+        env:
+          ANALYTIC_CONTINUATION_FRAGMENT_OVERRIDE: ${{ github.workspace }}/build/properly-typed/analytic-continuation-typed-probe.frag
+        run: |
+          ./gradlew --no-daemon clean :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            ../build/properly-typed/properly-typed-core-frozen.apk
+
+      - name: Restore live motion and build compiler-generated probe APK
+        working-directory: android
+        env:
+          ANALYTIC_CONTINUATION_FRAGMENT_OVERRIDE: ${{ github.workspace }}/build/properly-typed/analytic-continuation-typed-probe.frag
+        run: |
+          cp /tmp/analytic_continuation_random.c app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'const float speed = 0.30f;' app/src/main/cpp/analytic_continuation_random.c
+          ./gradlew --no-daemon clean :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            ../build/properly-typed/properly-typed-probe.apk
+
+      - name: Verify APK shader provenance
+        run: |
+          unzip -p build/properly-typed/handwritten-core-frozen.apk assets/continuation.frag \
+            > build/properly-typed/apk-handwritten-core.frag
+          unzip -p build/properly-typed/properly-typed-core-frozen.apk assets/continuation.frag \
+            > build/properly-typed/apk-typed-core.frag
+          unzip -p build/properly-typed/properly-typed-probe.apk assets/continuation.frag \
+            > build/properly-typed/apk-live-typed-core.frag
+          cmp build/properly-typed/handwritten-core-probe.frag \
+            build/properly-typed/apk-handwritten-core.frag
+          cmp build/properly-typed/analytic-continuation-typed-probe.frag \
+            build/properly-typed/apk-typed-core.frag
+          cmp build/properly-typed/analytic-continuation-typed-probe.frag \
+            build/properly-typed/apk-live-typed-core.frag
+
+      - name: Enable KVM permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | \
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Compare handwritten and compiler-generated frames, then run live typed motion
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: medium_phone
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
+          script: |
+            set -eux
+            package=org.isomorphisms.analyticcontinuation.lasso.dev
+            activity=org.isomorphisms.analyticcontinuation.ExplorerActivity
+
+            adb install -r build/properly-typed/handwritten-core-frozen.apk
+            adb logcat -c
+            adb shell am start -W -n "$package/$activity"
+            sleep 4
+            adb logcat -d > build/properly-typed/handwritten-core-emulator.log
+            grep -Fq 'holomorphic field renderer ready:' build/properly-typed/handwritten-core-emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|holomorphic field shader uniforms unavailable|FATAL EXCEPTION' \
+              build/properly-typed/handwritten-core-emulator.log
+            adb exec-out screencap -p > build/properly-typed/handwritten-core.png
+
+            adb shell am force-stop "$package"
+            adb install -r build/properly-typed/properly-typed-core-frozen.apk
+            adb logcat -c
+            adb shell am start -W -n "$package/$activity"
+            sleep 4
+            adb logcat -d > build/properly-typed/properly-typed-core-emulator.log
+            grep -Fq 'holomorphic field renderer ready:' build/properly-typed/properly-typed-core-emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|holomorphic field shader uniforms unavailable|FATAL EXCEPTION' \
+              build/properly-typed/properly-typed-core-emulator.log
+            adb exec-out screencap -p > build/properly-typed/properly-typed-core.png
+
+            python3 - <<'PY'
+            from PIL import Image, ImageChops, ImageStat
+
+            handwritten = Image.open('build/properly-typed/handwritten-core.png').convert('RGB')
+            typed = Image.open('build/properly-typed/properly-typed-core.png').convert('RGB')
+            if handwritten.size != typed.size:
+                raise SystemExit('comparison screenshots have different dimensions')
+            width, height = handwritten.size
+            box = (
+                int(width * 0.10),
+                int(height * 0.15),
+                int(width * 0.90),
+                int(height * 0.85),
+            )
+            first = handwritten.crop(box)
+            second = typed.crop(box)
+            diff = ImageChops.difference(first, second)
+            mean = sum(ImageStat.Stat(diff).mean) / 3.0
+            pixels = list(diff.getdata())
+            changed = sum(1 for pixel in pixels if max(pixel) >= 8)
+            changed_fraction = changed / max(len(pixels), 1)
+            maximum = max((max(pixel) for pixel in pixels), default=0)
+            print(
+                f'handwritten-vs-typed mean_abs_rgb={mean:.4f} '
+                f'changed_fraction_ge8={changed_fraction:.6f} max_channel={maximum}'
+            )
+            if mean > 1.0 or changed_fraction > 0.02:
+                raise SystemExit('compiler-generated core diverges materially from handwritten core')
+            PY
+
+            adb shell am force-stop "$package"
+            adb install -r build/properly-typed/properly-typed-probe.apk
+            adb logcat -c
+            adb shell am start -W -n "$package/$activity"
+            sleep 4
+            adb logcat -d > build/properly-typed/properly-typed-live-emulator.log
+            grep -Fq 'holomorphic field renderer ready:' build/properly-typed/properly-typed-live-emulator.log
+            grep -Fq 'holomorphic field first frame:' build/properly-typed/properly-typed-live-emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|holomorphic field shader uniforms unavailable|FATAL EXCEPTION' \
+              build/properly-typed/properly-typed-live-emulator.log
+            steps_before=$(sed -n 's/.*holomorphic field: workers=3 steps=\([0-9][0-9]*\).*/\1/p' \
+              build/properly-typed/properly-typed-live-emulator.log | tail -1)
+            test -n "$steps_before"
+            adb exec-out screencap -p > build/properly-typed/properly-typed-motion-a.png
+            sleep 6
+            adb exec-out screencap -p > build/properly-typed/properly-typed-motion-b.png
+            adb logcat -d > build/properly-typed/properly-typed-live-emulator.log
+            steps_after=$(sed -n 's/.*holomorphic field: workers=3 steps=\([0-9][0-9]*\).*/\1/p' \
+              build/properly-typed/properly-typed-live-emulator.log | tail -1)
+            test -n "$steps_after"
+            test "$steps_after" -gt "$steps_before"
+
+            python3 - <<'PY'
+            from PIL import Image, ImageChops, ImageStat
+
+            first = Image.open('build/properly-typed/properly-typed-motion-a.png').convert('RGB')
+            second = Image.open('build/properly-typed/properly-typed-motion-b.png').convert('RGB')
+            width, height = first.size
+            box = (
+                int(width * 0.10),
+                int(height * 0.15),
+                int(width * 0.90),
+                int(height * 0.85),
+            )
+            diff = ImageChops.difference(first.crop(box), second.crop(box))
+            mean = sum(ImageStat.Stat(diff).mean) / 3.0
+            pixels = list(diff.getdata())
+            changed = sum(1 for pixel in pixels if max(pixel) >= 8)
+            changed_fraction = changed / max(len(pixels), 1)
+            print(f'typed live motion mean_abs_rgb={mean:.3f} changed_fraction={changed_fraction:.3f}')
+            if mean < 1.5 or changed_fraction < 0.10:
+                raise SystemExit('compiler-generated core is not visibly evolving')
+            PY
+
+      - name: Write GPU execution receipt
+        if: success()
+        run: |
+          typed_sha=$(sha256sum build/properly-typed/analytic-continuation-typed-probe.frag | cut -d' ' -f1)
           ir_sha=$(sha256sum build/properly-typed/analytic-continuation-handwritten-core.ir | cut -d' ' -f1)
-          handwritten_sha=$(sha256sum build/properly-typed/live-handwritten.frag | cut -d' ' -f1)
+          handwritten_sha=$(sha256sum build/properly-typed/handwritten-core-probe.frag | cut -d' ' -f1)
+          apk_sha=$(sha256sum build/properly-typed/properly-typed-probe.apk | cut -d' ' -f1)
           cat > build/properly-typed/receipt.tsv <<EOF
-          PROPERLY_TYPED_FRAGMENT_RECEIPT	1
+          PROPERLY_TYPED_FRAGMENT_RECEIPT	2
           analytic_continuation_sha	${GITHUB_SHA}
           shader_backend_sha	${SHADER_BACKEND_SHA}
           source_fragment	android/app/src/main/assets/continuation.frag.in
@@ -144,20 +367,23 @@ jobs:
           stage	generated_shader_validation	PASS
           stage	generated_program_link	PASS
           stage	handwritten_shader_validation	PASS
-          stage	shader_load	SKIP	no GLES driver execution in this lane
-          stage	gpu_execution	SKIP	no physical or software GPU execution in this lane
-          stage	framebuffer_comparison	SKIP	first probe is compile/link only
-          stage	vendor_device_receipt	SKIP	phone acceptance is separate
+          stage	android_apk_packaging	PASS
+          stage	shader_load	PASS	Android emulator GLES3/SwiftShader
+          stage	gpu_execution	PASS	Android emulator GLES3/SwiftShader
+          stage	framebuffer_comparison	PASS	frozen handwritten core versus frozen compiler-generated core
+          stage	live_typed_motion	PASS	compiler-generated core driven by live holomorphic coefficients
+          stage	vendor_device_receipt	SKIP	physical PowerVR phone acceptance remains separate
           generated_fragment_sha256	${typed_sha}
           typed_ir_sha256	${ir_sha}
           handwritten_fragment_sha256	${handwritten_sha}
+          probe_apk_sha256	${apk_sha}
           EOF
           cat build/properly-typed/receipt.tsv
 
-      - name: Retain typed fragment evidence
+      - name: Retain typed Android evidence and APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: properly-typed-fragment
+          name: properly-typed-android-probe
           path: build/properly-typed
           if-no-files-found: warn
