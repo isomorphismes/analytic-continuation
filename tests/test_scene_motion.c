@@ -100,6 +100,36 @@ static void test_half_circle_exchange(void) {
     assert(near(scene.pole_positions[0][1], 0.0f, 1.0e-6f));
 }
 
+static void test_exchange_timeline_uses_wall_clock(void) {
+    struct scene scene;
+    scene_initialize_default(&scene);
+    scene_clear_factors(&scene);
+    assert(scene_add_factor(&scene, SCENE_FACTOR_ZERO, -1.0f, 0.0f, NULL));
+    assert(scene_add_factor(&scene, SCENE_FACTOR_POLE, 1.0f, 0.0f, NULL));
+
+    struct motion_program motion;
+    motion_program_initialize(&motion);
+    assert(motion_program_add_exchange(
+        &motion,
+        (struct motion_factor_ref){SCENE_FACTOR_ZERO, 0},
+        (struct motion_factor_ref){SCENE_FACTOR_POLE, 0},
+        1.0f,
+        2.0f,
+        MOTION_TURN_CLOCKWISE
+    ));
+
+    /* Three deliberately slow rendered frames still advance a three-second event. */
+    motion_program_advance(&motion, &scene, 1.0f);
+    assert(!motion.exchanges[0].completed);
+    motion_program_advance(&motion, &scene, 1.0f);
+    assert(!motion.exchanges[0].completed);
+    motion_program_advance(&motion, &scene, 1.0f);
+    assert(motion.exchanges[0].completed);
+    assert(near(motion.elapsed_seconds, 3.0f, 1.0e-6f));
+    assert(near(scene.zero_positions[0][0], 1.0f, 1.0e-6f));
+    assert(near(scene.pole_positions[0][0], -1.0f, 1.0e-6f));
+}
+
 static void test_wander_is_not_lockstep(void) {
     struct scene scene;
     scene_initialize_default(&scene);
@@ -147,6 +177,7 @@ int main(void) {
     test_default_scene();
     test_scenario_parser();
     test_half_circle_exchange();
+    test_exchange_timeline_uses_wall_clock();
     test_wander_is_not_lockstep();
     test_invalid_exchange_reference();
     puts("scene/motion/scenario tests passed");
