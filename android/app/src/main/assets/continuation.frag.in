@@ -6,6 +6,7 @@ precision highp int;
 
 #define MAX_FACTORS 32
 #define HOLOMORPHIC_COEFFICIENT_COUNT 5
+#define REMOTE_POLE_COUNT 8
 
 in vec2 v_ndc;
 out vec4 frag_color;
@@ -39,6 +40,53 @@ vec2 holomorphic_q(vec2 z) {
     return q;
 }
 
+vec2 remote_pole_direction(int index) {
+    // Golden-angle-ish placement avoids an artificial symmetric ring.
+    if (index == 0) return vec2(1.000, 0.000);
+    if (index == 1) return vec2(-0.737, 0.676);
+    if (index == 2) return vec2(0.087, -0.996);
+    if (index == 3) return vec2(0.609, 0.793);
+    if (index == 4) return vec2(-0.985, -0.174);
+    if (index == 5) return vec2(0.843, -0.537);
+    if (index == 6) return vec2(-0.259, 0.966);
+    return vec2(-0.462, -0.887);
+}
+
+float remote_pole_radius_scale(int index) {
+    if (index == 0) return 2.55;
+    if (index == 1) return 2.85;
+    if (index == 2) return 3.10;
+    if (index == 3) return 2.70;
+    if (index == 4) return 3.25;
+    if (index == 5) return 2.95;
+    if (index == 6) return 2.65;
+    return 3.35;
+}
+
+vec2 remote_pole_motion(int index) {
+    // Re-use the already-smooth live coefficient state only as a clock/source
+    // of motion. The remote Xs themselves are genuine poles, not polynomial
+    // basis terms. Different cross-couplings make the eight poles wander along
+    // different paths even though the host still publishes only five complex
+    // coefficients.
+    int first_index = index % HOLOMORPHIC_COEFFICIENT_COUNT;
+    int second_index = (index * 2 + 1) % HOLOMORPHIC_COEFFICIENT_COUNT;
+    vec2 first = u_holomorphic_coefficients[first_index];
+    vec2 second = u_holomorphic_coefficients[second_index];
+    float handedness = (index % 2 == 0) ? 1.0 : -1.0;
+    vec2 raw = vec2(
+        first.x + handedness * (0.73 * second.y + 0.19 * first.y),
+        first.y + handedness * (-0.61 * second.x + 0.17 * second.y)
+    );
+    return raw / (0.35 + length(raw));
+}
+
+vec2 remote_pole_position(int index, float view_outer_radius) {
+    vec2 base = remote_pole_radius_scale(index) * remote_pole_direction(index);
+    vec2 wander = 0.85 * remote_pole_motion(index);
+    return view_outer_radius * (base + wander);
+}
+
 float circle_mask(vec2 point, vec2 center, float radius) {
     return 1.0 - smoothstep(radius - 1.25, radius + 1.25, length(point - center));
 }
@@ -63,6 +111,7 @@ void main() {
     float pixel_radius = 0.42 * min(u_resolution.x, u_resolution.y) * u_zoom;
     vec2 pixel = gl_FragCoord.xy - 0.5 * u_resolution;
     vec2 z = pixel / pixel_radius;
+    float view_outer_radius = length(0.5 * u_resolution) / pixel_radius;
 
     float phase = 0.0;
     float log_modulus = 0.0;
@@ -79,6 +128,17 @@ void main() {
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_pole_count) break;
         vec2 delta = z - u_pole_positions[index];
+        float radius_squared = max(dot(delta, delta), 1.0e-16);
+        phase -= atan(delta.y, delta.x);
+        log_modulus -= 0.5 * log(radius_squared);
+    }
+
+    // Eight additional X singularities are kept well outside the circumscribed
+    // visible region. They move continuously as the existing live state moves,
+    // and every fragment evaluates their meromorphic influence directly.
+    for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
+        vec2 pole = remote_pole_position(index, view_outer_radius);
+        vec2 delta = z - pole;
         float radius_squared = max(dot(delta, delta), 1.0e-16);
         phase -= atan(delta.y, delta.x);
         log_modulus -= 0.5 * log(radius_squared);
