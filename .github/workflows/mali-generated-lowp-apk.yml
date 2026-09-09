@@ -177,8 +177,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
           script: |
             set -eux
-            apk=build/mali-generated-lowp/analytic-continuation-mali-generated-lowp.apk
-            adb install -r "$apk"
+            adb install -r build/mali-generated-lowp/analytic-continuation-mali-generated-lowp.apk
             adb logcat -c
             adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
             sleep 4
