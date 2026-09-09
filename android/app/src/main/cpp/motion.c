@@ -226,8 +226,15 @@ bool motion_program_advance(
     if (!program->enabled || dt <= 0.0f) {
         return false;
     }
-    if (dt > 0.05f) dt = 0.05f;
+
+    /*
+     * The event timeline follows wall-clock time. A slow frame must not make a
+     * six-second exchange take twenty seconds. Only the integrated random wander
+     * is bounded per update; exchange positions are evaluated directly on their
+     * continuous half-circle trajectory at the current timeline time.
+     */
     program->elapsed_seconds += dt;
+    float integration_dt = dt > 0.05f ? 0.05f : dt;
 
     bool active_zero[SCENE_MAX_FACTORS] = {false};
     bool active_pole[SCENE_MAX_FACTORS] = {false};
@@ -250,13 +257,25 @@ bool motion_program_advance(
 
     for (int index = 0; index < scene->zero_count; ++index) {
         if (!active_zero[index]) {
-            wander_factor(program, scene->zero_positions[index], SCENE_FACTOR_ZERO, index, dt);
+            wander_factor(
+                program,
+                scene->zero_positions[index],
+                SCENE_FACTOR_ZERO,
+                index,
+                integration_dt
+            );
             changed = true;
         }
     }
     for (int index = 0; index < scene->pole_count; ++index) {
         if (!active_pole[index]) {
-            wander_factor(program, scene->pole_positions[index], SCENE_FACTOR_POLE, index, dt);
+            wander_factor(
+                program,
+                scene->pole_positions[index],
+                SCENE_FACTOR_POLE,
+                index,
+                integration_dt
+            );
             changed = true;
         }
     }
