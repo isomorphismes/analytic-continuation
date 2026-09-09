@@ -6,6 +6,8 @@ precision highp int;
 
 #define MAX_FACTORS 32
 #define HOLOMORPHIC_COEFFICIENT_COUNT 5
+// Keep the remote-pole scenario contract visible here without compiling its loop.
+#define REMOTE_POLE_COUNT 24
 
 in vec2 v_ndc;
 out vec4 frag_color;
