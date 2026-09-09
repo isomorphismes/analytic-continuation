@@ -12,8 +12,8 @@ permissions:
 env:
   IDRIS2_VERSION: 0.8.0
   COMPLEX_FOLLOWER_SHA: 4360f29d3bbdc09b4cc513e4a6be647f290ffede
-  GENERIC_BACKEND_SHA: c8c55a6eb351e5a0196335e8b2cb3cf0f1fd4fb0
-  MALI_BACKEND_SHA: efcdbc8fddbe897f98a11375cb565965dc471ceb
+  GENERIC_BACKEND_SHA: 177214918d73b0dd0413ac66add6e930b88c3cb1
+  MALI_BACKEND_SHA: 9097161816296b700fd80eee7dc738fa51dc059f
 
 jobs:
   compile-current-core:
@@ -171,10 +171,10 @@ jobs:
               })
 
           report = [
-              'STRUCTURED_SHADER_BACKEND_PROBE 3',
+              'STRUCTURED_SHADER_BACKEND_PROBE 4',
               'complex_follower=4360f29d3bbdc09b4cc513e4a6be647f290ffede',
-              'generic_backend=c8c55a6eb351e5a0196335e8b2cb3cf0f1fd4fb0',
-              'mali_backend=efcdbc8fddbe897f98a11375cb565965dc471ceb',
+              'generic_backend=177214918d73b0dd0413ac66add6e930b88c3cb1',
+              'mali_backend=9097161816296b700fd80eee7dc738fa51dc059f',
               '',
           ]
           for row in rows:
