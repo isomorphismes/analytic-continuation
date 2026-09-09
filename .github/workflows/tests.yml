@@ -6,6 +6,7 @@ on:
 
 env:
   SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  COMPLEX_PROJECTIVE_POLICY_SHA: 8e14cb50db10a055a0849e0ad7cab26454cd5791
 
 jobs:
   unit-tests:
@@ -26,6 +27,13 @@ jobs:
           ref: math/complex-projective-semantics
           path: .idric-complex
           persist-credentials: false
+      - name: Check out merged receipt policy
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/ai-ci
+          ref: ${{ env.COMPLEX_PROJECTIVE_POLICY_SHA }}
+          path: .ai-ci-complex-policy
+          persist-credentials: false
       - name: Record complex/projective semantic target
         run: echo "IDRIC_COMPLEX_SEMANTICS_SHA=$(git -C .idric-complex rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Reject cross-repository coloring drift
@@ -37,6 +45,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests -v
+      - name: Verify application evidence claims against merged policy
+        run: python3 .ai-ci-complex-policy/complex-projective/verify_receipt.py verify build/complex-projective-consumer/receipt.tsv
       - name: Smoke-test three holomorphic direction workers
         run: |
           cc -std=c11 -Wall -Wextra -Werror \
