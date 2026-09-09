@@ -1,0 +1,218 @@
+name: Mali generated highp APK
+
+# Comparison experiment only. The intended application precision remains lowp.
+on:
+  push:
+    branches:
+      - properly-typed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IDRIS2_VERSION: 0.8.0
+  COMPLEX_FOLLOWER_SHA: 4360f29d3bbdc09b4cc513e4a6be647f290ffede
+  MALI_BACKEND_SHA: e4dd4ef1a51a81d2b0ab03655f81e2ae7037bc9c
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out Analytic Continuation
+        uses: actions/checkout@v4
+
+      - name: Check out complex arithmetic follower
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/idris-shader-backend
+          ref: ${{ env.COMPLEX_FOLLOWER_SHA }}
+          path: .complex-follower
+          persist-credentials: false
+
+      - name: Check out repaired Mali backend
+        uses: actions/checkout@v4
+        with:
+          repository: isomorphisms/idris-shader-backend
+          ref: ${{ env.MALI_BACKEND_SHA }}
+          path: .mali-backend
+          persist-credentials: false
+
+      - name: Overlay the complex/projective follower
+        run: |
+          cp .complex-follower/src/Shader/ComplexProjectiveFollower.idr \
+            .mali-backend/src/Shader/ComplexProjectiveFollower.idr
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install compiler, shader, and Android dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chezscheme glslang-tools libgmp-dev
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Restore Idris 2 compiler and API
+        id: idris-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.idris2
+          key: properly-typed-idris2-${{ runner.os }}-${{ runner.arch }}-${{ env.IDRIS2_VERSION }}-api-v1
+
+      - name: Build Idris 2 if cache is empty
+        if: steps.idris-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "v${IDRIS2_VERSION}" \
+            https://github.com/idris-lang/Idris2.git /tmp/Idris2
+          make -C /tmp/Idris2 bootstrap SCHEME=chezscheme
+          make -C /tmp/Idris2 install
+          export PATH="$HOME/.idris2/bin:$PATH"
+          make -C /tmp/Idris2 clean
+          make -C /tmp/Idris2 all
+          make -C /tmp/Idris2 install
+          make -C /tmp/Idris2 install-api
+
+      - name: Put Idris 2 on PATH
+        run: echo "$HOME/.idris2/bin" >> "$GITHUB_PATH"
+
+      - name: Build repaired Mali compiler
+        run: make -C .mali-backend backend
+
+      - name: Compile the current typed core as highp
+        run: |
+          mkdir -p build/mali-generated-highp
+          cp gpu/Example/AnalyticContinuationHandwrittenCore.idr \
+            .mali-backend/src/Example/AnalyticContinuationHandwrittenCore.idr
+          .mali-backend/build/exec/idris2-glsles \
+            --cg glsles \
+            --directive float-precision=highp \
+            --directive dump-ir="$GITHUB_WORKSPACE/build/mali-generated-highp/core.ir" \
+            --source-dir .mali-backend/src \
+            --output-dir "$GITHUB_WORKSPACE/build/mali-generated-highp" \
+            .mali-backend/src/Example/AnalyticContinuationHandwrittenCore.idr \
+            -o core
+
+      - name: Prove highp and repaired control flow
+        run: |
+          fragment=build/mali-generated-highp/core.frag
+          grep -Fq 'precision highp float;' "$fragment"
+          ! grep -Fq 'precision lowp float;' "$fragment"
+          test "$(grep -c 'atan(' "$fragment")" -eq 64
+          test "$(grep -c 'log(' "$fragment")" -eq 64
+          test "$(grep -c '  if (' "$fragment")" -ge 68
+          test "$(grep -c ' ? ' "$fragment" || true)" -eq 0
+          glslangValidator -S frag "$fragment"
+
+      - name: Adapt generated core to the live Android ABI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('build/mali-generated-highp/core.frag')
+          output = Path('build/mali-generated-highp/continuation.frag')
+          shader = source.read_text()
+          needle = 'uniform float u_zoom;\n'
+          if needle not in shader:
+              raise SystemExit('generated shader lost u_zoom')
+          shader = shader.replace(needle, needle + 'uniform int u_placement_kind;\n', 1)
+
+          lines = shader.splitlines()
+          assignment = None
+          for index in range(len(lines) - 1, -1, -1):
+              stripped = lines[index].strip()
+              if stripped.startswith('_idris_fragColor = ') and stripped.endswith(';'):
+                  assignment = index
+                  break
+          if assignment is None:
+              raise SystemExit('generated shader output assignment not found')
+          rhs = lines[assignment].strip().split('=', 1)[1].strip()[:-1]
+          lines[assignment:assignment + 1] = [
+              '  if (u_placement_kind < -1000) {',
+              '    _idris_fragColor = vec4(0.0);',
+              '  } else {',
+              f'    _idris_fragColor = {rhs};',
+              '  }',
+          ]
+          output.write_text('\n'.join(lines) + '\n')
+          PY
+          glslangValidator -S frag build/mali-generated-highp/continuation.frag
+
+      - name: Build live Mali-generated highp APK
+        working-directory: android
+        env:
+          ANALYTIC_CONTINUATION_FRAGMENT_OVERRIDE: ${{ github.workspace }}/build/mali-generated-highp/continuation.frag
+        run: |
+          ./gradlew --no-daemon clean :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            ../build/mali-generated-highp/analytic-continuation-mali-generated-highp.apk
+
+      - name: Prove packaged shader provenance
+        run: |
+          unzip -p build/mali-generated-highp/analytic-continuation-mali-generated-highp.apk \
+            assets/continuation.frag > build/mali-generated-highp/apk-continuation.frag
+          cmp build/mali-generated-highp/continuation.frag \
+            build/mali-generated-highp/apk-continuation.frag
+          grep -Fq 'precision highp float;' build/mali-generated-highp/apk-continuation.frag
+
+      - name: Enable KVM permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | \
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Load the repaired highp generated shader on Android GLES3
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: medium_phone
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
+          script: |
+            set -eux
+            adb install -r build/mali-generated-highp/analytic-continuation-mali-generated-highp.apk
+            adb logcat -c
+            adb shell am start -W -n org.isomorphisms.analyticcontinuation.lasso.dev/org.isomorphisms.analyticcontinuation.ExplorerActivity
+            sleep 4
+            adb logcat -d > build/mali-generated-highp/emulator.log
+            grep -Fq 'holomorphic field renderer ready:' build/mali-generated-highp/emulator.log
+            grep -Fq 'holomorphic field first frame:' build/mali-generated-highp/emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|holomorphic field shader uniforms unavailable|FATAL EXCEPTION' build/mali-generated-highp/emulator.log
+
+      - name: Write receipt
+        run: |
+          shader_sha=$(sha256sum build/mali-generated-highp/continuation.frag | cut -d' ' -f1)
+          apk_sha=$(sha256sum build/mali-generated-highp/analytic-continuation-mali-generated-highp.apk | cut -d' ' -f1)
+          cat > build/mali-generated-highp/receipt.tsv <<EOF
+          MALI_GENERATED_HIGHP_RECEIPT\t1
+          purpose\tcomparison_only_lowp_remains_intended_policy
+          analytic_continuation_sha\t${GITHUB_SHA}
+          mali_backend_sha\t${MALI_BACKEND_SHA}
+          complex_follower_sha\t${COMPLEX_FOLLOWER_SHA}
+          stage\thighp_emission\tPASS
+          stage\tstructured_expensive_branches\tPASS
+          stage\tglsl_validation\tPASS
+          stage\tandroid_apk_packaging\tPASS
+          stage\tpackaged_shader_provenance\tPASS
+          stage\tandroid_gles3_load_and_first_frame\tPASS\tSwiftShader emulator
+          stage\tphysical_mali_g57_timing\tSKIP\tinstall this APK on the tablet
+          shader_sha256\t${shader_sha}
+          apk_sha256\t${apk_sha}
+          EOF
+          cat build/mali-generated-highp/receipt.tsv
+
+      - name: Retain APK and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analytic-continuation-mali-generated-highp
+          path: build/mali-generated-highp
+          if-no-files-found: error
