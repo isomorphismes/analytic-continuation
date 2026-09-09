@@ -18,20 +18,13 @@ if (( height < width )); then
 fi
 
 pixel_radius=$((42 * min_side / 100))
-initial_zero_x=$((width / 2 - 34 * pixel_radius / 100))
-initial_zero_y=$((height / 2))
-cluster_x=$((width / 2 - 120))
-cluster_y=$((height / 2 + 80))
+cluster_x=$((width / 2 - 34 * pixel_radius / 100))
+cluster_y=$((height / 2))
 exclude_radius=$((22 * min_side / 100))
 
-# Move the initial zero into the cluster, then add seven more within a few
-# pixels. The resulting eight zeros model an order-eight repeated root while
-# retaining separate draggable factors in the UI.
-adb shell input swipe \
-    "$initial_zero_x" "$initial_zero_y" \
-    "$cluster_x" "$cluster_y" 450
-sleep 1
-
+# The app starts with one zero at z=-0.34. Leave it in place and add seven
+# more within a few pixels. This models an order-eight repeated root without
+# depending on a drag gesture merely to construct the runtime fixture.
 for offset in \
     '2 0' \
     '-2 1' \
