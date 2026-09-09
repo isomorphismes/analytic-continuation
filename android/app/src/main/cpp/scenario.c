@@ -134,7 +134,9 @@ void scenario_initialize_interactive(struct scenario *scenario) {
     scene_initialize_default(&scenario->scene);
     motion_program_initialize(&scenario->motion);
     presentation_config_interactive(&scenario->presentation);
+    scenario->field_background = FIELD_BACKGROUND_ENTIRE;
     scenario->field_speed = 0.30f;
+    scenario->field_budget = HOLOMORPHIC_WALK_DEFAULT_COEFFICIENT_BUDGET;
 }
 
 bool scenario_parse_text(
@@ -242,9 +244,26 @@ bool scenario_parse_text(
                 set_error(error, error_capacity, "marker_stroke must be numeric");
                 return false;
             }
+        } else if (strcmp(key, "field") == 0) {
+            if (strcmp(value, "entire") == 0) {
+                scenario->field_background = FIELD_BACKGROUND_ENTIRE;
+            } else if (
+                strcmp(value, "wandering_offscreen_poles") == 0 ||
+                strcmp(value, "remote_poles") == 0
+            ) {
+                scenario->field_background = FIELD_BACKGROUND_WANDERING_OFFSCREEN_POLES;
+            } else {
+                set_error(error, error_capacity, "field must be entire or wandering_offscreen_poles");
+                return false;
+            }
         } else if (strcmp(key, "field_speed") == 0) {
             if (!parse_float_value(value, &scenario->field_speed) || scenario->field_speed <= 0.0f) {
                 set_error(error, error_capacity, "field_speed must be positive");
+                return false;
+            }
+        } else if (strcmp(key, "field_budget") == 0) {
+            if (!parse_float_value(value, &scenario->field_budget) || scenario->field_budget <= 0.53f) {
+                set_error(error, error_capacity, "field_budget must be greater than 0.53");
                 return false;
             }
         } else if (strcmp(key, "motion") == 0) {
@@ -295,6 +314,11 @@ bool scenario_parse_text(
         scenario->presentation.marker_stroke_px >= scenario->presentation.marker_radius_px
     ) {
         set_error(error, error_capacity, "marker sizes must satisfy 0 < stroke < radius");
+        return false;
+    }
+
+    if (scenario->field_speed <= 0.0f || scenario->field_budget <= 0.53f) {
+        set_error(error, error_capacity, "field speed and budget are invalid");
         return false;
     }
 
