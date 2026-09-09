@@ -13,16 +13,20 @@ static void publish_if_due(struct field_evolution *field, double now) {
 
 void field_evolution_initialize(
     struct field_evolution *field,
+    enum field_background_mode background_mode,
     float speed,
+    float coefficient_budget,
     double now
 ) {
     memset(field, 0, sizeof(*field));
+    field->background_mode = background_mode;
     field->speed = speed;
+    field->coefficient_budget = coefficient_budget;
     field->last_time = now;
 }
 
 bool field_evolution_start(struct field_evolution *field, double now) {
-    field->workers_started = holomorphic_walk_start();
+    field->workers_started = holomorphic_walk_start(field->coefficient_budget);
     field->last_time = now;
     if (!field->workers_started) return false;
 
@@ -60,6 +64,12 @@ bool field_evolution_advance(
     publish_if_due(field, now);
     if (!allow_motion) return false;
 
+    bool changed = false;
+    if (field->background_mode == FIELD_BACKGROUND_WANDERING_OFFSCREEN_POLES) {
+        field->remote_pole_time += dt;
+        changed = true;
+    }
+
     float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
     float score = field->last_score;
     if (
@@ -79,7 +89,7 @@ bool field_evolution_advance(
         field->last_score = score;
     }
 
-    if (!field->direction_ready) return false;
+    if (!field->direction_ready) return changed;
 
     float candidate[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
     for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
@@ -87,7 +97,7 @@ bool field_evolution_advance(
         candidate[index][1] = field->coefficients[index][1] + dt * field->velocity[index][1];
     }
 
-    if (holomorphic_walk_coefficient_budget(candidate) <= HOLOMORPHIC_WALK_COEFFICIENT_BUDGET) {
+    if (holomorphic_walk_coefficient_budget(candidate) <= field->coefficient_budget) {
         memcpy(field->coefficients, candidate, sizeof(field->coefficients));
         field->accepted_steps += 1;
         return true;
@@ -98,5 +108,5 @@ bool field_evolution_advance(
         field->velocity[index][1] *= -0.30f;
     }
     field_evolution_publish_now(field, now);
-    return false;
+    return changed;
 }
