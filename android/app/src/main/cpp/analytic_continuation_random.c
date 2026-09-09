@@ -11,10 +11,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 #include <time.h>
-
-#include "holomorphic_walk.h"
 
 #define LOG_TAG "AnalyticContinuation"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -60,7 +57,7 @@ struct engine {
     GLint pole_count_location;
     GLint zero_positions_location;
     GLint pole_positions_location;
-    GLint holomorphic_coefficients_location;
+    GLint time_location;
     GLint zoom_location;
     GLint placement_kind_location;
 
@@ -70,14 +67,7 @@ struct engine {
     int pole_count;
     enum placement_kind placement_kind;
 
-    float holomorphic_coefficients[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
-    float deformation_velocity[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
-    double deformation_last_time;
-    double deformation_last_publish;
-    double deformation_last_log;
-    uint64_t deformation_accepted_steps;
-    bool deformation_workers_started;
-    bool deformation_direction_ready;
+    double animation_start_time;
     bool focused;
 
     float zoom;
@@ -113,14 +103,7 @@ static void initialize_state(struct engine *engine) {
     engine->pole_positions[0][1] = 0.0f;
 
     engine->placement_kind = PLACEMENT_ZERO;
-    memset(engine->holomorphic_coefficients, 0, sizeof(engine->holomorphic_coefficients));
-    memset(engine->deformation_velocity, 0, sizeof(engine->deformation_velocity));
-    engine->deformation_last_time = monotonic_seconds();
-    engine->deformation_last_publish = 0.0;
-    engine->deformation_last_log = 0.0;
-    engine->deformation_accepted_steps = 0;
-    engine->deformation_workers_started = false;
-    engine->deformation_direction_ready = false;
+    engine->animation_start_time = monotonic_seconds();
     engine->focused = false;
 
     engine->zoom = 1.0f;
@@ -252,20 +235,17 @@ static bool create_renderer(struct engine *engine) {
     engine->pole_count_location = glGetUniformLocation(engine->program, "u_pole_count");
     engine->zero_positions_location = glGetUniformLocation(engine->program, "u_zero_positions[0]");
     engine->pole_positions_location = glGetUniformLocation(engine->program, "u_pole_positions[0]");
-    engine->holomorphic_coefficients_location = glGetUniformLocation(
-        engine->program, "u_holomorphic_coefficients[0]"
-    );
+    engine->time_location = glGetUniformLocation(engine->program, "u_time");
     engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
     engine->placement_kind_location = glGetUniformLocation(engine->program, "u_placement_kind");
 
     if (
         engine->resolution_location < 0 || engine->zero_count_location < 0 ||
         engine->pole_count_location < 0 || engine->zero_positions_location < 0 ||
-        engine->pole_positions_location < 0 ||
-        engine->holomorphic_coefficients_location < 0 ||
+        engine->pole_positions_location < 0 || engine->time_location < 0 ||
         engine->zoom_location < 0 || engine->placement_kind_location < 0
     ) {
-        LOGE("holomorphic field shader uniforms unavailable");
+        LOGE("Cauchy field shader uniforms unavailable");
         return false;
     }
 
@@ -285,7 +265,7 @@ static bool create_renderer(struct engine *engine) {
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     LOGI(
-        "holomorphic field renderer ready: GL_VERSION=%s GL_RENDERER=%s",
+        "Cauchy field renderer ready: GL_VERSION=%s GL_RENDERER=%s",
         glGetString(GL_VERSION), glGetString(GL_RENDERER)
     );
     return true;
@@ -331,7 +311,7 @@ static bool initialize_display(struct engine *engine) {
     eglGetConfigAttrib(display, config, EGL_NATIVE_VISUAL_ID, &format);
     ANativeWindow_setBuffersGeometry(engine->app->window, 0, 0, format);
 
-    EGLSurface surface = eglCreateWindowSurface(display, config, engine->app->window, NULL);
+    EGLSurface surface = eglCreateWindowSurface(display, config, app->window, NULL);
     EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attributes);
     if (surface == EGL_NO_SURFACE || context == EGL_NO_CONTEXT) {
         LOGE("could not create EGL surface/context: 0x%x", eglGetError());
@@ -369,7 +349,7 @@ static bool initialize_display(struct engine *engine) {
     glViewport(0, 0, engine->width, engine->height);
     engine->dirty = true;
     LOGI(
-        "holomorphic field ready: surface=%dx%d zeros=%d poles=%d",
+        "Cauchy field ready: surface=%dx%d zeros=%d poles=%d",
         engine->width, engine->height, engine->zero_count, engine->pole_count
     );
     return true;
@@ -428,6 +408,8 @@ static void draw_frame(struct engine *engine) {
         return;
     }
 
+    float animation_time = (float)(monotonic_seconds() - engine->animation_start_time);
+
     glUseProgram(engine->program);
     glUniform2f(engine->resolution_location, (float)engine->width, (float)engine->height);
     glUniform1i(engine->zero_count_location, engine->zero_count);
@@ -438,11 +420,7 @@ static void draw_frame(struct engine *engine) {
     glUniform2fv(
         engine->pole_positions_location, MAX_FACTORS, &engine->pole_positions[0][0]
     );
-    glUniform2fv(
-        engine->holomorphic_coefficients_location,
-        HOLOMORPHIC_WALK_COEFFICIENT_COUNT,
-        &engine->holomorphic_coefficients[0][0]
-    );
+    glUniform1f(engine->time_location, animation_time);
     glUniform1f(engine->zoom_location, engine->zoom);
     glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
 
@@ -456,7 +434,7 @@ static void draw_frame(struct engine *engine) {
             GL_RGBA, GL_UNSIGNED_BYTE, center_pixel
         );
         LOGI(
-            "holomorphic field first frame: center rgba=%u,%u,%u,%u",
+            "Cauchy field first frame: center rgba=%u,%u,%u,%u",
             center_pixel[0], center_pixel[1], center_pixel[2], center_pixel[3]
         );
         engine->logged_first_frame = true;
@@ -602,110 +580,6 @@ static void add_factor(
     LOGI("%s added: z=%.6g%+.6gi count=%d", name, point[0], point[1], *count);
 }
 
-static void publish_deformation_snapshot(struct engine *engine, double now) {
-    if (!engine->deformation_workers_started) {
-        return;
-    }
-    if (
-        engine->deformation_last_publish == 0.0 ||
-        now - engine->deformation_last_publish >= 0.200
-    ) {
-        holomorphic_walk_publish(engine->holomorphic_coefficients);
-        engine->deformation_last_publish = now;
-    }
-}
-
-static void log_holomorphic_state(struct engine *engine, double now, float score) {
-    if (now - engine->deformation_last_log < 2.0) {
-        return;
-    }
-    LOGI(
-        "holomorphic field: workers=%d steps=%llu budget=%.4f score=%.6g zeros=%d poles=%d",
-        HOLOMORPHIC_WALK_WORKER_COUNT,
-        (unsigned long long)engine->deformation_accepted_steps,
-        holomorphic_walk_coefficient_budget(engine->holomorphic_coefficients),
-        score,
-        engine->zero_count,
-        engine->pole_count
-    );
-    engine->deformation_last_log = now;
-}
-
-static void advance_holomorphic_function(struct engine *engine) {
-    double now = monotonic_seconds();
-    float dt = (float)(now - engine->deformation_last_time);
-    engine->deformation_last_time = now;
-    if (dt <= 0.0f) {
-        return;
-    }
-    if (dt > 0.05f) {
-        dt = 0.05f;
-    }
-
-    publish_deformation_snapshot(engine, now);
-    if (!engine->focused || engine->dragging_factor || engine->pinching) {
-        return;
-    }
-
-    float score = 0.0f;
-    float direction[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
-    if (
-        engine->deformation_workers_started &&
-        holomorphic_walk_best_direction(direction, &score)
-    ) {
-        float blend = 1.0f - expf(-4.0f * dt);
-        const float speed = 0.30f;
-        for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-            engine->deformation_velocity[index][0] =
-                (1.0f - blend) * engine->deformation_velocity[index][0] +
-                blend * speed * direction[index][0];
-            engine->deformation_velocity[index][1] =
-                (1.0f - blend) * engine->deformation_velocity[index][1] +
-                blend * speed * direction[index][1];
-        }
-        engine->deformation_direction_ready = true;
-    }
-
-    if (!engine->deformation_direction_ready) {
-        log_holomorphic_state(engine, now, score);
-        return;
-    }
-
-    float candidate[HOLOMORPHIC_WALK_COEFFICIENT_COUNT][2];
-    for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-        candidate[index][0] =
-            engine->holomorphic_coefficients[index][0] +
-            dt * engine->deformation_velocity[index][0];
-        candidate[index][1] =
-            engine->holomorphic_coefficients[index][1] +
-            dt * engine->deformation_velocity[index][1];
-    }
-
-    if (
-        holomorphic_walk_coefficient_budget(candidate) <=
-        HOLOMORPHIC_WALK_COEFFICIENT_BUDGET
-    ) {
-        memcpy(
-            engine->holomorphic_coefficients,
-            candidate,
-            sizeof(engine->holomorphic_coefficients)
-        );
-        engine->deformation_accepted_steps += 1;
-        engine->dirty = true;
-    } else {
-        for (int index = 0; index < HOLOMORPHIC_WALK_COEFFICIENT_COUNT; ++index) {
-            engine->deformation_velocity[index][0] *= -0.30f;
-            engine->deformation_velocity[index][1] *= -0.30f;
-        }
-        if (engine->deformation_workers_started) {
-            holomorphic_walk_publish(engine->holomorphic_coefficients);
-            engine->deformation_last_publish = now;
-        }
-    }
-
-    log_holomorphic_state(engine, now, score);
-}
-
 static void clear_gesture(struct engine *engine) {
     engine->candidate_kind = FACTOR_NONE;
     engine->candidate_index = -1;
@@ -736,8 +610,8 @@ static void update_pinch(struct engine *engine, AInputEvent *event) {
     if (distance < 8.0f) return;
 
     float zoom = engine->pinch_start_zoom * distance / engine->pinch_start_distance;
-    if (zoom < 0.5f) zoom = 0.5f;
-    if (zoom > 4.0f) zoom = 4.0f;
+    if (zoom < 0.1f) zoom = 0.1f;
+    if (zoom > 32.0f) zoom = 32.0f;
     if (fabsf(zoom - engine->zoom) > 1.0e-4f) {
         engine->zoom = zoom;
         engine->dirty = true;
@@ -842,10 +716,6 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event) {
                 );
             }
             clear_gesture(engine);
-            if (engine->deformation_workers_started) {
-                holomorphic_walk_publish(engine->holomorphic_coefficients);
-                engine->deformation_last_publish = monotonic_seconds();
-            }
             return 1;
         }
 
@@ -884,7 +754,6 @@ static void handle_command(struct android_app *app, int32_t command) {
             break;
         case APP_CMD_GAINED_FOCUS:
             engine->focused = true;
-            engine->deformation_last_time = monotonic_seconds();
             engine->dirty = true;
             break;
         case APP_CMD_LOST_FOCUS:
@@ -908,18 +777,6 @@ void android_main(struct android_app *app) {
     };
     initialize_state(&engine);
 
-    engine.deformation_workers_started = holomorphic_walk_start();
-    if (engine.deformation_workers_started) {
-        holomorphic_walk_publish(engine.holomorphic_coefficients);
-        engine.deformation_last_publish = monotonic_seconds();
-        LOGI(
-            "holomorphic field started with %d workers",
-            HOLOMORPHIC_WALK_WORKER_COUNT
-        );
-    } else {
-        LOGE("holomorphic direction workers unavailable; rendering static meromorphic map");
-    }
-
     app->userData = &engine;
     app->onAppCmd = handle_command;
     app->onInputEvent = handle_input;
@@ -935,17 +792,13 @@ void android_main(struct android_app *app) {
             source->process(app, source);
         }
         if (app->destroyRequested != 0) {
-            if (engine.deformation_workers_started) {
-                holomorphic_walk_stop();
-                engine.deformation_workers_started = false;
-            }
             terminate_display(&engine);
             return;
         }
-        if (engine.display != EGL_NO_DISPLAY && engine.focused) {
-            advance_holomorphic_function(&engine);
-        }
-        if (engine.dirty) {
+        if (
+            engine.display != EGL_NO_DISPLAY &&
+            (engine.focused || engine.dirty)
+        ) {
             draw_frame(&engine);
         }
     }
