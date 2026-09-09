@@ -184,8 +184,7 @@ jobs:
             adb logcat -d > build/mali-generated-lowp/emulator.log
             grep -Fq 'holomorphic field renderer ready:' build/mali-generated-lowp/emulator.log
             grep -Fq 'holomorphic field first frame:' build/mali-generated-lowp/emulator.log
-            ! grep -Eiq 'shader compilation failed|program link failed|holomorphic field shader uniforms unavailable|FATAL EXCEPTION' \
-              build/mali-generated-lowp/emulator.log
+            ! grep -Eiq 'shader compilation failed|program link failed|holomorphic field shader uniforms unavailable|FATAL EXCEPTION' build/mali-generated-lowp/emulator.log
 
       - name: Write receipt
         run: |
