@@ -54,7 +54,10 @@ vec2 source_position(int index, float time, float view_radius) {
 
 vec2 source_weight(int index, float time) {
     float source_index = float(index);
-    float amplitude = mix(0.015, 0.08, hash1(source_index + 11.3));
+    // The first 0.015..0.08 pass was mathematically live but visually too weak
+    // in an actual 2400x1080 APK capture. Keep 24 sources and strengthen their
+    // residues rather than adding more per-fragment kernels.
+    float amplitude = mix(0.08, 0.35, hash1(source_index + 11.3));
     float omega = mix(0.08, 0.60, hash1(source_index + 17.8));
     float phi0 = 6.28318530718 * hash1(source_index + 21.4);
     float phi = phi0 + omega * time;
