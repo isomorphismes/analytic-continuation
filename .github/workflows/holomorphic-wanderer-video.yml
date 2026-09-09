@@ -43,7 +43,11 @@ jobs:
           ram-size: 3072M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -no-metrics
-          script: bash video/capture_holomorphic_wanderers.sh
+          script: |
+            sed -i 's/adb shell wm size 540x960/adb shell wm size 180x320/' video/capture_holomorphic_wanderers.sh
+            sed -i 's/adb shell wm density 160/adb shell wm density 120/' video/capture_holomorphic_wanderers.sh
+            sed -i 's/screenrecord --size 960x540 --bit-rate 8000000 --time-limit 22/screenrecord --size 320x180 --bit-rate 2500000 --time-limit 22/' video/capture_holomorphic_wanderers.sh
+            bash video/capture_holomorphic_wanderers.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
