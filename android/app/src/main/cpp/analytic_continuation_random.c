@@ -439,11 +439,15 @@ static void remote_pole_positions_for_frame(
     float positions[REMOTE_POLE_COUNT][2]
 ) {
     const float tau = 6.2831853f;
-    float pixel_radius = view_pixel_radius(engine);
-    float view_outer_radius = hypotf(
+    // Keep the wanderers in the mathematical plane. Zoom changes the view,
+    // not their coordinates. At zoom 1 this matches the established orbit scale.
+    float base_pixel_radius = 0.42f * fminf(
+        (float)engine->width, (float)engine->height
+    );
+    float world_outer_radius = hypotf(
         0.5f * (float)engine->width,
         0.5f * (float)engine->height
-    ) / pixel_radius;
+    ) / base_pixel_radius;
 
     for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
         float k = (float)index;
@@ -461,9 +465,9 @@ static void remote_pole_positions_for_frame(
         float ellipticity = -0.08f
             + 0.16f * remote_pole_hash(k + 14.67f);
 
-        positions[index][0] = view_outer_radius * radius
+        positions[index][0] = world_outer_radius * radius
             * (1.0f + ellipticity) * cosf(angle);
-        positions[index][1] = view_outer_radius * radius
+        positions[index][1] = world_outer_radius * radius
             * (1.0f - ellipticity) * sinf(angle);
     }
 }

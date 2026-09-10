@@ -67,8 +67,13 @@ void main() {
     vec2 z = pixel / pixel_radius;
     float view_outer_radius = length(0.5 * u_resolution) / pixel_radius;
 
-    float phase = 0.0;
-    float log_modulus = 0.0;
+    // H(z) = exp(q(z)) is entire and nonzero. Wegert coloring only uses
+    // phase modulo tau and log-modulus modulo log(10), so reduce the large
+    // entire contribution before adding the explicit divisor. This prevents
+    // far-zoom fp32 cancellation from making user zeros/poles numerically vanish.
+    vec2 q = holomorphic_q(z);
+    float phase = q.y - WEGERT_TAU * floor(q.y / WEGERT_TAU);
+    float log_modulus = q.x - WEGERT_LOG_10 * floor(q.x / WEGERT_LOG_10);
 
     // R(z): the explicit meromorphic divisor on the ordinary complex plane.
     for (int index = 0; index < MAX_FACTORS; ++index) {
@@ -105,12 +110,6 @@ void main() {
     log_modulus -= log(remote_scale)
         + 0.5 * log(max(dot(remote_normalized, remote_normalized), 1.0e-16));
 
-    // H(z) = exp(q(z)) is entire and nonzero, so it changes neither zeros nor
-    // poles. Re(q) adds to log modulus and Im(q) adds to phase exactly.
-    vec2 q = holomorphic_q(z);
-    log_modulus += q.x;
-    phase += q.y;
-
     vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);
 
     // Everything below is interaction overlay, not the value -> Wegert color oracle.
@@ -141,6 +140,27 @@ void main() {
             )
         );
         color = mix(color, vec3(0.04), pole_mark);
+    }
+
+    // Remote poles are persistent mathematical poles. Draw their X markers
+    // when zoom brings them into the viewport, without making them editable.
+    // Use a cheap diagonal-distance mask so the phone fast path stays light.
+    for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
+        vec2 center = 0.5 * u_resolution
+            + u_remote_pole_positions[index] * pixel_radius;
+        if (
+            center.x < -10.0 || center.x > u_resolution.x + 10.0 ||
+            center.y < -10.0 || center.y > u_resolution.y + 10.0
+        ) {
+            continue;
+        }
+        vec2 offset = abs(gl_FragCoord.xy - center);
+        float extent = max(offset.x, offset.y);
+        float diagonal = abs(offset.x - offset.y);
+        float remote_mark =
+            (1.0 - smoothstep(1.4, 2.6, diagonal)) *
+            (1.0 - smoothstep(7.0, 8.5, extent));
+        color = mix(color, vec3(0.04), remote_mark);
     }
 
     float placement_radius = clamp(0.048 * min(u_resolution.x, u_resolution.y), 26.0, 38.0);
