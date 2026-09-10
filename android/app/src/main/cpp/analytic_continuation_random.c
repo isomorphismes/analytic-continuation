@@ -794,9 +794,7 @@ static void update_pinch(struct engine *engine, AInputEvent *event) {
     if (distance < 8.0f) return;
 
     float zoom = engine->pinch_start_zoom * distance / engine->pinch_start_distance;
-    if (zoom < 0.5f) zoom = 0.5f;
-    if (zoom > 4.0f) zoom = 4.0f;
-    if (fabsf(zoom - engine->zoom) > 1.0e-4f) {
+    if (isfinite(zoom) && zoom > 0.0f && zoom != engine->zoom) {
         engine->zoom = zoom;
         engine->dirty = true;
     }
