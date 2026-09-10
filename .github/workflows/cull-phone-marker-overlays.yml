@@ -1,0 +1,48 @@
+name: Cull PowerVR marker overlays
+
+on:
+  push:
+    branches:
+      - experiment/powervr-phone-fastpath
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[marker-cull]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+
+      - name: Cull marker distance work outside marker bounds
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('android/app/src/main/assets/continuation.frag.in')
+          text = path.read_text()
+
+          old_zero = '''    for (int index = 0; index < MAX_FACTORS; ++index) {\n        if (index >= u_zero_count) break;\n        vec2 center = 0.5 * u_resolution + u_zero_positions[index] * pixel_radius;\n        float mark = ring_mask(gl_FragCoord.xy, center, 9.0, 5.0);\n        color = mix(color, vec3(0.04), mark);\n        float highlight = ring_mask(gl_FragCoord.xy, center, 6.8, 5.5);\n        color = mix(color, vec3(0.98), highlight);\n    }\n'''
+          new_zero = '''    for (int index = 0; index < MAX_FACTORS; ++index) {\n        if (index >= u_zero_count) break;\n        vec2 center = 0.5 * u_resolution + u_zero_positions[index] * pixel_radius;\n        vec2 marker_offset = abs(gl_FragCoord.xy - center);\n        if (max(marker_offset.x, marker_offset.y) > 11.0) continue;\n        float mark = ring_mask(gl_FragCoord.xy, center, 9.0, 5.0);\n        color = mix(color, vec3(0.04), mark);\n        float highlight = ring_mask(gl_FragCoord.xy, center, 6.8, 5.5);\n        color = mix(color, vec3(0.98), highlight);\n    }\n'''
+          if text.count(old_zero) != 1:
+              raise SystemExit('zero marker block mismatch')
+          text = text.replace(old_zero, new_zero, 1)
+
+          old_pole = '''    for (int index = 0; index < MAX_FACTORS; ++index) {\n        if (index >= u_pole_count) break;\n        vec2 center = 0.5 * u_resolution + u_pole_positions[index] * pixel_radius;\n        float pole_mark = max(\n'''
+          new_pole = '''    for (int index = 0; index < MAX_FACTORS; ++index) {\n        if (index >= u_pole_count) break;\n        vec2 center = 0.5 * u_resolution + u_pole_positions[index] * pixel_radius;\n        vec2 marker_offset = abs(gl_FragCoord.xy - center);\n        if (max(marker_offset.x, marker_offset.y) > 11.0) continue;\n        float pole_mark = max(\n'''
+          if text.count(old_pole) != 1:
+              raise SystemExit('ordinary pole marker block mismatch')
+          path.write_text(text.replace(old_pole, new_pole, 1))
+          PY
+
+          git diff --check
+          test "$(grep -Fc 'if (max(marker_offset.x, marker_offset.y) > 11.0) continue;' android/app/src/main/assets/continuation.frag.in)" -eq 2
+          python -m unittest discover -s tests -v
+          git config user.name i
+          git config user.email isomorphisms@sdf.org
+          git add android/app/src/main/assets/continuation.frag.in
+          git commit -m 'Cull distant marker overlay work [marker-cull]'
+          git push origin HEAD:experiment/powervr-phone-fastpath
