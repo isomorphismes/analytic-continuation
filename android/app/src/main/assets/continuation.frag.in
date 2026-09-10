@@ -158,6 +158,8 @@ void main() {
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_zero_count) break;
         vec2 center = 0.5 * u_resolution + u_zero_positions[index] * pixel_radius;
+        vec2 marker_offset = abs(gl_FragCoord.xy - center);
+        if (max(marker_offset.x, marker_offset.y) > 11.0) continue;
         float mark = ring_mask(gl_FragCoord.xy, center, 9.0, 5.0);
         color = mix(color, vec3(0.04), mark);
         float highlight = ring_mask(gl_FragCoord.xy, center, 6.8, 5.5);
@@ -167,6 +169,8 @@ void main() {
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_pole_count) break;
         vec2 center = 0.5 * u_resolution + u_pole_positions[index] * pixel_radius;
+        vec2 marker_offset = abs(gl_FragCoord.xy - center);
+        if (max(marker_offset.x, marker_offset.y) > 11.0) continue;
         float pole_mark = max(
             line_mask(
                 gl_FragCoord.xy,
