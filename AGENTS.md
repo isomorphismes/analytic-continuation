@@ -1,5 +1,36 @@
 # Agent instructions
 
+## Idriç rewrite branch
+
+This branch is a fresh Idriç implementation. It is not a branch for extending the existing handwritten C/GLSL implementation or mechanically transliterating it.
+
+Before writing or reviewing Idriç-facing source, read the current canonical Idriç guidance:
+
+1. `isomorphisms/Idric` branch `Idriç`: `STYLE.md`
+2. `isomorphisms/Idric` branch `Idriç`: `examples/intent/railway/README.md`
+3. `isomorphisms/Idric` branch `Idriç`: `examples/intent/http_server/README.md`
+4. `isomorphisms/Idric` branch `Idriç`: `AGENTS.md`
+
+Those sources govern Idriç style. Do not infer new-source style from inherited Idris, Haskell, C, GLSL, generated code, or bootstrap code.
+
+For new Idriç source:
+
+- write purpose-ordered top-level code and put intent above mechanism;
+- prefer ordinary and domain vocabulary, grammatical role phrases, and semantic types;
+- use `snake_case` for ordinary identifiers;
+- use `Number`, not `Nat`; use `List`, not generic `Vect`, unless a domain-specific shape is genuinely part of the meaning;
+- use Idriç Unicode notation, including `→`, `←`, `⇒`, `≠`, `≝`, `∘`, and mathematical `−` where appropriate;
+- reserve `=` for equality; do not use it as a definition marker;
+- call side-effecting procedures actions rather than functions; reserve “function” for mathematical mappings;
+- hide primitives, JNI/FFI declarations, raw graphics/API calls, and other machinery below meaningful source-facing actions;
+- keep build, packaging, generated, test-harness, and compiler machinery under `_` where the repository uses that boundary;
+- explain non-obvious numerical constants and representation choices by their meaning;
+- do not invent a speculative folder/module architecture in advance. Establish modularity later from real reuse and semantic boundaries.
+
+Do not put new handwritten Holomorphic/Wegert mathematics or rendering logic in C or GLSL on this branch. Existing C/GLSL on other branches may be consulted as an oracle for behavior, but it does not define the Idriç architecture and must not be copied alongside the new implementation. Android uses DEX/JNI as the practical host boundary until the relevant Idriç CPU backends are ready. GPU work must exercise the Idriç shader backend when that path is claimed. The x86-64 backend may be used for offline rendering only when the generated x86 path actually executes. Do not use Python in the implementation, rendering, test, or reference pipeline.
+
+When a compiler/backend limitation blocks the clean Idriç expression, fix or expose the general compiler/backend limitation rather than adding an application-specific escape hatch.
+
 ## Cross-repository anti-patterns
 
 These rules apply in addition to stricter repository-specific rules below.
