@@ -1,0 +1,42 @@
+name: Unclamp PowerVR phone zoom
+
+on:
+  push:
+    branches:
+      - experiment/powervr-phone-fastpath
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[zoom-unclamped]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+
+      - name: Remove arbitrary pinch zoom limits
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('android/app/src/main/cpp/analytic_continuation_random.c')
+          text = path.read_text()
+          old = '''    float zoom = engine->pinch_start_zoom * distance / engine->pinch_start_distance;\n    if (zoom < 0.5f) zoom = 0.5f;\n    if (zoom > 4.0f) zoom = 4.0f;\n    if (fabsf(zoom - engine->zoom) > 1.0e-4f) {\n        engine->zoom = zoom;\n        engine->dirty = true;\n    }\n'''
+          new = '''    float zoom = engine->pinch_start_zoom * distance / engine->pinch_start_distance;\n    if (isfinite(zoom) && zoom > 0.0f && zoom != engine->zoom) {\n        engine->zoom = zoom;\n        engine->dirty = true;\n    }\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one zoom clamp block, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          git diff --check
+          ! grep -Fq 'if (zoom < 0.5f)' android/app/src/main/cpp/analytic_continuation_random.c
+          ! grep -Fq 'if (zoom > 4.0f)' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'isfinite(zoom) && zoom > 0.0f && zoom != engine->zoom' android/app/src/main/cpp/analytic_continuation_random.c
+          git config user.name i
+          git config user.email isomorphisms@sdf.org
+          git add android/app/src/main/cpp/analytic_continuation_random.c
+          git commit -m 'Remove arbitrary phone zoom clamp [zoom-unclamped]'
+          git push origin HEAD:experiment/powervr-phone-fastpath
