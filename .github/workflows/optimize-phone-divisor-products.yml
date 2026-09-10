@@ -39,6 +39,10 @@ jobs:
 
           test_path = Path('tests/test_wegert_color_parity.py')
           test = test_path.read_text()
+          test = test.replace(
+              'divisor_boundary = template.index("// R(z): the explicit meromorphic divisor")',
+              'divisor_boundary = template.index("// R(z): accumulate all explicit zeros and poles")',
+          )
           old = '''        value_tokens = (\n            "vec2 q = holomorphic_q(z);",\n            phase_reduction,\n            modulus_reduction,\n            "phase += atan(delta.y, delta.x);",\n            "log_modulus += 0.5 * log(radius_squared);",\n            "phase -= atan(delta.y, delta.x);",\n            "log_modulus -= 0.5 * log(radius_squared);",\n            "phase -= atan(remote_product.y, remote_product.x);",\n            "log_modulus -= log(remote_scale)",\n        )\n'''
           new = '''        value_tokens = (\n            "vec2 q = holomorphic_q(z);",\n            phase_reduction,\n            modulus_reduction,\n            "vec2 zero_product = vec2(1.0, 0.0);",\n            "vec2 pole_product = vec2(1.0, 0.0);",\n            "z - u_zero_positions[index]",\n            "z - u_pole_positions[index]",\n            "z - u_remote_pole_positions[index]",\n            "zero_product, zero_logarithmic_scale, 1.0, phase, log_modulus",\n            "pole_product, pole_logarithmic_scale, -1.0, phase, log_modulus",\n        )\n'''
           if test.count(old) != 1:
