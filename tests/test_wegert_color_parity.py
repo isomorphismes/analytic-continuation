@@ -140,7 +140,7 @@ class WegertColorParityTests(unittest.TestCase):
             "log_modulus += 0.5 * log(radius_squared);",
             "phase -= atan(delta.y, delta.x);",
             "log_modulus -= 0.5 * log(radius_squared);",
-            "vec2 q = holomorphic_q(z);",
+            "vec2 q = holomorphic_field(z, u_time, view_radius);",
             "log_modulus += q.x;",
             "phase += q.y;",
         )

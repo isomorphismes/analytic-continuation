@@ -10,7 +10,6 @@ target_include_directories(native_app_glue PUBLIC "${NATIVE_GLUE_DIR}")
 
 add_library(analytic_continuation SHARED
     analytic_continuation_random.c
-    holomorphic_walk.c
 )
 target_compile_features(analytic_continuation PRIVATE c_std_11)
 target_compile_options(analytic_continuation PRIVATE -Wall -Wextra -Wpedantic)
