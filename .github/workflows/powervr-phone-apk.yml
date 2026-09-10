@@ -1,0 +1,66 @@
+name: PowerVR phone APK
+
+on:
+  push:
+    branches:
+      - experiment/powervr-phone-fastpath
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+
+      - name: Verify PowerVR-oriented hot path
+        run: |
+          set -euo pipefail
+          grep -Fq 'uniform vec2 u_remote_pole_positions[REMOTE_POLE_COUNT];' android/app/src/main/assets/continuation.frag.in
+          ! grep -Fq 'u_remote_pole_time' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'remote_product = complex_multiply(remote_product, delta);' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'remote pole path: CPU positions + collapsed fragment product' android/app/src/main/cpp/analytic_continuation_random.c
+          python -m unittest discover -s tests -v
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Iandroid/app/src/main/cpp \
+            tests/test_holomorphic_walk.c \
+            android/app/src/main/cpp/holomorphic_walk.c \
+            -pthread -lm \
+            -o /tmp/test-holomorphic-walk
+          /tmp/test-holomorphic-walk
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+
+      - name: Install Android toolchain
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Build signed sideload APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Verify and name APK
+        run: |
+          set -euo pipefail
+          source_apk=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$source_apk"
+          unzip -t "$source_apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$source_apk"
+          cp "$source_apk" holomorphic-powervr-phone.apk
+          sha256sum holomorphic-powervr-phone.apk > holomorphic-powervr-phone.apk.sha256
+          git rev-parse HEAD > holomorphic-powervr-phone.commit
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: holomorphic-powervr-phone
+          path: |
+            holomorphic-powervr-phone.apk
+            holomorphic-powervr-phone.apk.sha256
+            holomorphic-powervr-phone.commit
+          if-no-files-found: error
