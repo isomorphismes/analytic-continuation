@@ -21,6 +21,7 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
 #define MAX_FACTORS 32
+#define REMOTE_POLE_COUNT 24
 
 static const char *VERTEX_SHADER =
     "#version 300 es\n"
@@ -61,7 +62,7 @@ struct engine {
     GLint zero_positions_location;
     GLint pole_positions_location;
     GLint holomorphic_coefficients_location;
-    GLint remote_pole_time_location;
+    GLint remote_pole_positions_location;
     GLint zoom_location;
     GLint placement_kind_location;
 
@@ -258,8 +259,8 @@ static bool create_renderer(struct engine *engine) {
     engine->holomorphic_coefficients_location = glGetUniformLocation(
         engine->program, "u_holomorphic_coefficients[0]"
     );
-    engine->remote_pole_time_location = glGetUniformLocation(
-        engine->program, "u_remote_pole_time"
+    engine->remote_pole_positions_location = glGetUniformLocation(
+        engine->program, "u_remote_pole_positions[0]"
     );
     engine->zoom_location = glGetUniformLocation(engine->program, "u_zoom");
     engine->placement_kind_location = glGetUniformLocation(engine->program, "u_placement_kind");
@@ -269,7 +270,7 @@ static bool create_renderer(struct engine *engine) {
         engine->pole_count_location < 0 || engine->zero_positions_location < 0 ||
         engine->pole_positions_location < 0 ||
         engine->holomorphic_coefficients_location < 0 ||
-        engine->remote_pole_time_location < 0 ||
+        engine->remote_pole_positions_location < 0 ||
         engine->zoom_location < 0 || engine->placement_kind_location < 0
     ) {
         LOGE("holomorphic field shader uniforms unavailable");
@@ -295,6 +296,7 @@ static bool create_renderer(struct engine *engine) {
         "holomorphic field renderer ready: GL_VERSION=%s GL_RENDERER=%s",
         glGetString(GL_VERSION), glGetString(GL_RENDERER)
     );
+    LOGI("remote pole path: CPU positions + collapsed fragment product");
     return true;
 }
 
@@ -427,6 +429,45 @@ static float view_pixel_radius(const struct engine *engine) {
     return 0.42f * fminf((float)engine->width, (float)engine->height) * engine->zoom;
 }
 
+static float remote_pole_hash(float x) {
+    float value = sinf(x * 127.1f + 31.7f) * 43758.5453123f;
+    return value - floorf(value);
+}
+
+static void remote_pole_positions_for_frame(
+    const struct engine *engine,
+    float positions[REMOTE_POLE_COUNT][2]
+) {
+    const float tau = 6.2831853f;
+    float pixel_radius = view_pixel_radius(engine);
+    float view_outer_radius = hypotf(
+        0.5f * (float)engine->width,
+        0.5f * (float)engine->height
+    ) / pixel_radius;
+
+    for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
+        float k = (float)index;
+        float initial_angle = tau * remote_pole_hash(k + 0.11f);
+        float radius_scale = 2.75f
+            + 1.25f * remote_pole_hash(k + 1.73f);
+        float speed = 0.11f
+            + 0.08f * remote_pole_hash(k + 4.37f);
+        float handedness = remote_pole_hash(k + 7.91f) < 0.5f ? -1.0f : 1.0f;
+        float angle = initial_angle
+            + handedness * speed * engine->remote_pole_time;
+        float bend_phase = tau * remote_pole_hash(k + 11.23f);
+        float radius = radius_scale
+            + 0.22f * sinf(2.0f * angle + bend_phase);
+        float ellipticity = -0.08f
+            + 0.16f * remote_pole_hash(k + 14.67f);
+
+        positions[index][0] = view_outer_radius * radius
+            * (1.0f + ellipticity) * cosf(angle);
+        positions[index][1] = view_outer_radius * radius
+            * (1.0f - ellipticity) * sinf(angle);
+    }
+}
+
 static void draw_frame(struct engine *engine) {
     if (
         engine->display == EGL_NO_DISPLAY || engine->program == 0 ||
@@ -450,7 +491,13 @@ static void draw_frame(struct engine *engine) {
         HOLOMORPHIC_WALK_COEFFICIENT_COUNT,
         &engine->holomorphic_coefficients[0][0]
     );
-    glUniform1f(engine->remote_pole_time_location, engine->remote_pole_time);
+    float remote_pole_positions[REMOTE_POLE_COUNT][2];
+    remote_pole_positions_for_frame(engine, remote_pole_positions);
+    glUniform2fv(
+        engine->remote_pole_positions_location,
+        REMOTE_POLE_COUNT,
+        &remote_pole_positions[0][0]
+    );
     glUniform1f(engine->zoom_location, engine->zoom);
     glUniform1i(engine->placement_kind_location, (int)engine->placement_kind);
 

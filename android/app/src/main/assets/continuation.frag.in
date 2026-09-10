@@ -17,7 +17,7 @@ uniform int u_pole_count;
 uniform vec2 u_zero_positions[MAX_FACTORS];
 uniform vec2 u_pole_positions[MAX_FACTORS];
 uniform vec2 u_holomorphic_coefficients[HOLOMORPHIC_COEFFICIENT_COUNT];
-uniform float u_remote_pole_time;
+uniform vec2 u_remote_pole_positions[REMOTE_POLE_COUNT];
 uniform float u_zoom;
 uniform int u_placement_kind;
 
@@ -39,51 +39,6 @@ vec2 holomorphic_q(vec2 z) {
         power = complex_multiply(power, u);
     }
     return q;
-}
-
-float hash1(float x) {
-    return fract(sin(x * 127.1 + 31.7) * 43758.5453123);
-}
-
-vec2 remote_pole_direction(int index) {
-    float k = float(index);
-    float angle = 6.2831853 * hash1(k + 0.11);
-    return vec2(cos(angle), sin(angle));
-}
-
-float remote_pole_radius_scale(int index) {
-    float k = float(index);
-    return mix(2.75, 4.00, hash1(k + 1.73));
-}
-
-float remote_pole_orbit_speed(int index) {
-    float k = float(index);
-    return mix(0.11, 0.19, hash1(k + 4.37));
-}
-
-float remote_pole_handedness(int index) {
-    float k = float(index);
-    return hash1(k + 7.91) < 0.5 ? -1.0 : 1.0;
-}
-
-vec2 remote_pole_position(int index, float view_outer_radius) {
-    float k = float(index);
-    vec2 initial_direction = remote_pole_direction(index);
-    float initial_angle = atan(initial_direction.y, initial_direction.x);
-    float angle = initial_angle
-        + remote_pole_handedness(index) * remote_pole_orbit_speed(index) * u_remote_pole_time;
-
-    float bend_phase = 6.2831853 * hash1(k + 11.23);
-    float radial_bend = 0.22 * sin(2.0 * angle + bend_phase);
-    float radius = remote_pole_radius_scale(index) + radial_bend;
-
-    float ellipticity = mix(-0.08, 0.08, hash1(k + 14.67));
-    vec2 orbit = vec2(
-        (1.0 + ellipticity) * cos(angle),
-        (1.0 - ellipticity) * sin(angle)
-    );
-
-    return view_outer_radius * radius * orbit;
 }
 
 float circle_mask(vec2 point, vec2 center, float radius) {
@@ -132,16 +87,23 @@ void main() {
         log_modulus -= 0.5 * log(radius_squared);
     }
 
-    // Twenty-four additional X singularities stay well outside the circumscribed
-    // visible region. They move continuously as the existing live state moves,
-    // and every fragment evaluates their meromorphic influence directly.
+    // Twenty-four remote poles are positioned once per frame on the CPU.
+    // Their combined meromorphic contribution is evaluated as one complex
+    // product, replacing 24 per-pixel atan/log pairs with one phase/modulus
+    // extraction while preserving the same product of pole factors.
+    vec2 remote_product = vec2(1.0, 0.0);
     for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
-        vec2 pole = remote_pole_position(index, view_outer_radius);
-        vec2 delta = z - pole;
-        float radius_squared = max(dot(delta, delta), 1.0e-16);
-        phase -= atan(delta.y, delta.x);
-        log_modulus -= 0.5 * log(radius_squared);
+        vec2 delta = z - u_remote_pole_positions[index];
+        remote_product = complex_multiply(remote_product, delta);
     }
+    float remote_scale = max(
+        max(abs(remote_product.x), abs(remote_product.y)),
+        1.0e-20
+    );
+    vec2 remote_normalized = remote_product / remote_scale;
+    phase -= atan(remote_product.y, remote_product.x);
+    log_modulus -= log(remote_scale)
+        + 0.5 * log(max(dot(remote_normalized, remote_normalized), 1.0e-16));
 
     // H(z) = exp(q(z)) is entire and nonzero, so it changes neither zeros nor
     // poles. Re(q) adds to log modulus and Im(q) adds to phase exactly.
