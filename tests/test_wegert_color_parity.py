@@ -135,7 +135,7 @@ class WegertColorParityTests(unittest.TestCase):
     def test_meromorphic_and_holomorphic_value_is_complete_before_color_oracle(self) -> None:
         template = TEMPLATE_PATH.read_text()
         color_boundary = template.index(WEGERT_CALL)
-        divisor_boundary = template.index("// R(z): the explicit meromorphic divisor")
+        divisor_boundary = template.index("// R(z): accumulate all explicit zeros and poles")
         phase_reduction = "float phase = q.y - WEGERT_TAU * floor(q.y / WEGERT_TAU);"
         modulus_reduction = (
             "float log_modulus = q.x - WEGERT_LOG_10 * floor(q.x / WEGERT_LOG_10);"
@@ -144,12 +144,13 @@ class WegertColorParityTests(unittest.TestCase):
             "vec2 q = holomorphic_q(z);",
             phase_reduction,
             modulus_reduction,
-            "phase += atan(delta.y, delta.x);",
-            "log_modulus += 0.5 * log(radius_squared);",
-            "phase -= atan(delta.y, delta.x);",
-            "log_modulus -= 0.5 * log(radius_squared);",
-            "phase -= atan(remote_product.y, remote_product.x);",
-            "log_modulus -= log(remote_scale)",
+            "vec2 zero_product = vec2(1.0, 0.0);",
+            "vec2 pole_product = vec2(1.0, 0.0);",
+            "z - u_zero_positions[index]",
+            "z - u_pole_positions[index]",
+            "z - u_remote_pole_positions[index]",
+            "zero_product, zero_logarithmic_scale, 1.0, phase, log_modulus",
+            "pole_product, pole_logarithmic_scale, -1.0, phase, log_modulus",
         )
         for token in value_tokens:
             with self.subTest(token=token):

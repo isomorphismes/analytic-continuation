@@ -28,6 +28,40 @@ vec2 complex_multiply(vec2 left, vec2 right) {
     );
 }
 
+void accumulate_complex_product(
+    inout vec2 product,
+    inout float logarithmic_scale,
+    vec2 factor
+) {
+    if (dot(factor, factor) < 1.0e-16) {
+        factor = vec2(1.0e-8, 0.0);
+    }
+
+    product = complex_multiply(product, factor);
+    float scale = max(abs(product.x), abs(product.y));
+    if (scale > 1.0e8 || scale < 1.0e-8) {
+        product /= scale;
+        logarithmic_scale += log(scale);
+    }
+}
+
+void add_complex_product_contribution(
+    vec2 product,
+    float logarithmic_scale,
+    float sign,
+    inout float phase,
+    inout float log_modulus
+) {
+    float scale = max(max(abs(product.x), abs(product.y)), 1.0e-20);
+    vec2 normalized = product / scale;
+    phase += sign * atan(normalized.y, normalized.x);
+    log_modulus += sign * (
+        logarithmic_scale
+        + log(scale)
+        + 0.5 * log(max(dot(normalized, normalized), 1.0e-16))
+    );
+}
+
 vec2 holomorphic_q(vec2 z) {
     // Keep the normalization fixed in the mathematical plane rather than tied
     // to zoom, but make the live entire factor large enough to read on a phone.
@@ -75,40 +109,48 @@ void main() {
     float phase = q.y - WEGERT_TAU * floor(q.y / WEGERT_TAU);
     float log_modulus = q.x - WEGERT_LOG_10 * floor(q.x / WEGERT_LOG_10);
 
-    // R(z): the explicit meromorphic divisor on the ordinary complex plane.
+    // R(z): accumulate all explicit zeros and poles with complex multiplies.
+    // Extract phase/log-modulus only once for the numerator and denominator.
+    // This keeps adding many user zeros cheap enough for the PowerVR phone and
+    // preserves analytic cancellation when zeros approach wandering poles.
+    vec2 zero_product = vec2(1.0, 0.0);
+    float zero_logarithmic_scale = 0.0;
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_zero_count) break;
-        vec2 delta = z - u_zero_positions[index];
-        float radius_squared = max(dot(delta, delta), 1.0e-16);
-        phase += atan(delta.y, delta.x);
-        log_modulus += 0.5 * log(radius_squared);
+        accumulate_complex_product(
+            zero_product,
+            zero_logarithmic_scale,
+            z - u_zero_positions[index]
+        );
     }
 
+    vec2 pole_product = vec2(1.0, 0.0);
+    float pole_logarithmic_scale = 0.0;
     for (int index = 0; index < MAX_FACTORS; ++index) {
         if (index >= u_pole_count) break;
-        vec2 delta = z - u_pole_positions[index];
-        float radius_squared = max(dot(delta, delta), 1.0e-16);
-        phase -= atan(delta.y, delta.x);
-        log_modulus -= 0.5 * log(radius_squared);
+        accumulate_complex_product(
+            pole_product,
+            pole_logarithmic_scale,
+            z - u_pole_positions[index]
+        );
     }
 
-    // Twenty-four remote poles are positioned once per frame on the CPU.
-    // Their combined meromorphic contribution is evaluated as one complex
-    // product, replacing 24 per-pixel atan/log pairs with one phase/modulus
-    // extraction while preserving the same product of pole factors.
-    vec2 remote_product = vec2(1.0, 0.0);
+    // The 24 wanderers are persistent poles, but their divisor contribution
+    // can be canceled by user zeros exactly like any mathematical pole factor.
     for (int index = 0; index < REMOTE_POLE_COUNT; ++index) {
-        vec2 delta = z - u_remote_pole_positions[index];
-        remote_product = complex_multiply(remote_product, delta);
+        accumulate_complex_product(
+            pole_product,
+            pole_logarithmic_scale,
+            z - u_remote_pole_positions[index]
+        );
     }
-    float remote_scale = max(
-        max(abs(remote_product.x), abs(remote_product.y)),
-        1.0e-20
+
+    add_complex_product_contribution(
+        zero_product, zero_logarithmic_scale, 1.0, phase, log_modulus
     );
-    vec2 remote_normalized = remote_product / remote_scale;
-    phase -= atan(remote_product.y, remote_product.x);
-    log_modulus -= log(remote_scale)
-        + 0.5 * log(max(dot(remote_normalized, remote_normalized), 1.0e-16));
+    add_complex_product_contribution(
+        pole_product, pole_logarithmic_scale, -1.0, phase, log_modulus
+    );
 
     vec3 color = wegert_color_from_phase_log_modulus(phase, log_modulus);
 
