@@ -25,6 +25,11 @@ jobs:
           ! grep -Fq 'if (zoom < 0.5f)' android/app/src/main/cpp/analytic_continuation_random.c
           ! grep -Fq 'if (zoom > 4.0f)' android/app/src/main/cpp/analytic_continuation_random.c
           grep -Fq 'isfinite(zoom) && zoom > 0.0f && zoom != engine->zoom' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'world_outer_radius * radius' android/app/src/main/cpp/analytic_continuation_random.c
+          ! grep -Fq 'view_outer_radius * radius' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'q.y - WEGERT_TAU * floor(q.y / WEGERT_TAU)' android/app/src/main/assets/continuation.frag.in
+          ! grep -Fq 'phase += q.y' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'Remote poles are persistent mathematical poles.' android/app/src/main/assets/continuation.frag.in
           python -m unittest discover -s tests -v
           cc -std=c11 -Wall -Wextra -Werror \
             -Iandroid/app/src/main/cpp \
