@@ -22,6 +22,9 @@ jobs:
           ! grep -Fq 'u_remote_pole_time' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'remote_product = complex_multiply(remote_product, delta);' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'remote pole path: CPU positions + collapsed fragment product' android/app/src/main/cpp/analytic_continuation_random.c
+          ! grep -Fq 'if (zoom < 0.5f)' android/app/src/main/cpp/analytic_continuation_random.c
+          ! grep -Fq 'if (zoom > 4.0f)' android/app/src/main/cpp/analytic_continuation_random.c
+          grep -Fq 'isfinite(zoom) && zoom > 0.0f && zoom != engine->zoom' android/app/src/main/cpp/analytic_continuation_random.c
           python -m unittest discover -s tests -v
           cc -std=c11 -Wall -Wextra -Werror \
             -Iandroid/app/src/main/cpp \
