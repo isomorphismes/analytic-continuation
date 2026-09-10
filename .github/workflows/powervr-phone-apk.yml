@@ -20,7 +20,11 @@ jobs:
           set -euo pipefail
           grep -Fq 'uniform vec2 u_remote_pole_positions[REMOTE_POLE_COUNT];' android/app/src/main/assets/continuation.frag.in
           ! grep -Fq 'u_remote_pole_time' android/app/src/main/assets/continuation.frag.in
-          grep -Fq 'remote_product = complex_multiply(remote_product, delta);' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'vec2 zero_product = vec2(1.0, 0.0);' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'vec2 pole_product = vec2(1.0, 0.0);' android/app/src/main/assets/continuation.frag.in
+          grep -Fq 'can be canceled by user zeros' android/app/src/main/assets/continuation.frag.in
+          ! grep -Fq 'phase += atan(delta.y, delta.x);' android/app/src/main/assets/continuation.frag.in
+          ! grep -Fq 'phase -= atan(delta.y, delta.x);' android/app/src/main/assets/continuation.frag.in
           grep -Fq 'remote pole path: CPU positions + collapsed fragment product' android/app/src/main/cpp/analytic_continuation_random.c
           ! grep -Fq 'if (zoom < 0.5f)' android/app/src/main/cpp/analytic_continuation_random.c
           ! grep -Fq 'if (zoom > 4.0f)' android/app/src/main/cpp/analytic_continuation_random.c
