@@ -135,18 +135,28 @@ class WegertColorParityTests(unittest.TestCase):
     def test_meromorphic_and_holomorphic_value_is_complete_before_color_oracle(self) -> None:
         template = TEMPLATE_PATH.read_text()
         color_boundary = template.index(WEGERT_CALL)
+        divisor_boundary = template.index("// R(z): the explicit meromorphic divisor")
+        phase_reduction = "float phase = q.y - WEGERT_TAU * floor(q.y / WEGERT_TAU);"
+        modulus_reduction = (
+            "float log_modulus = q.x - WEGERT_LOG_10 * floor(q.x / WEGERT_LOG_10);"
+        )
         value_tokens = (
+            "vec2 q = holomorphic_q(z);",
+            phase_reduction,
+            modulus_reduction,
             "phase += atan(delta.y, delta.x);",
             "log_modulus += 0.5 * log(radius_squared);",
             "phase -= atan(delta.y, delta.x);",
             "log_modulus -= 0.5 * log(radius_squared);",
-            "vec2 q = holomorphic_q(z);",
-            "log_modulus += q.x;",
-            "phase += q.y;",
+            "phase -= atan(remote_product.y, remote_product.x);",
+            "log_modulus -= log(remote_scale)",
         )
         for token in value_tokens:
             with self.subTest(token=token):
                 self.assertLess(template.index(token), color_boundary)
+
+        self.assertLess(template.index(phase_reduction), divisor_boundary)
+        self.assertLess(template.index(modulus_reduction), divisor_boundary)
 
     def test_app_overlays_are_outside_value_to_color_oracle(self) -> None:
         template = TEMPLATE_PATH.read_text()
